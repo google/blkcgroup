@@ -1,0 +1,117 @@
+The primary motivation for this test is to verify that the
+control group based block layer isolation functions properly.
+
+This test creates and configures control groups and launches worker
+tasks in them, then evaluates how effective the isolation is.
+
+
+Concepts
+========
+Control Groups provide a mechanism for aggregating/partitioning
+sets of tasks, and all their future children, into hierarchical groups
+with specialized behavior.
+
+A cgroup hierarchy arranges cgroups in a tree so that resources can be
+partitioned at multiple levels. Split hierarchies allow for separate
+cgroup hierarchies per-resource for more flexible isolation.
+
+See Documentation/cgroups/cgroups.txt in the kernel source for more
+details.
+
+
+Requirements
+============
+0. Kernel options.
+This test requires a Linux kernel 2.6.26 or later.
+The following Kconfig options must be set:
+CONFIG_CGROUPS=y
+CONFIG_RESOURCE_COUNTERS=y
+CONFIG_DEBUG_BLK_CGROUP=y
+CONFIG_BLK_CGROUP=y
+CONFIG_IOSCHED_CFQ=y
+CONFIG_DEFAULT_CFQ=y
+CONFIG_CFQ_GROUP_IOSCHED=y
+
+1. Blkio controller.
+The blkio controller must be set up properly. This can be simply done:
+  $ mount -t cgroup -o cpuset,blkio none /dev/cgroup
+
+More thorough documentation is at Documentation/cgroups/blkio-controller.txt
+in the kernel tree.
+
+2. A relatively recent version of dd.
+This test uses "conv=fdatasync" and "oflag=direct" arguments for dd,
+which are available in recent versions of coretools.
+
+
+Building the tests
+==================
+We have to make some binaries that the test uses.
+$ make  # build a binary to service random read workers
+
+
+Running the tests
+=================
+$ ./regression_test.py  # Runs a suite of coverage tests
+or
+$ ./mixed_cgroup_test.py  # Runs a short smoke test.
+
+Test data is output to stdout. The very end of output will have a
+summary line like:
+"-----ran 34 experiments, 33 passed, 1 failed"
+
+Searching for "FAILED" in the test output will tell you which experiment
+failed (and by what margin). Passed experiments will indicate the
+achieved DTF margin.
+
+If you get errors about state left behind from the previous test, use
+the -c flag:
+$ ./regression_test.py -c
+which deletes state left behind from interrupted tests. Specifically, it
+deletes all containers prefixed with blkcgroupt.
+
+
+Adding new tests/writing new tests
+==================================
+Creating tests is pretty straightforward; if an invalid experiment is
+specified in the test, the harness will exit with an error. For example,
+current kernels do not support cgroup weights that would give less than 10%
+of disk time, so we can't run a test where workers would get 5% of the time.
+
+The central part of the test is a list of experiments, strings that specify a
+list of worker jobs, their corresponding weights of total cgroup weight,
+and the permitted "error": the difference we tolerate between requested
+weights and what is observed.
+
+It's generally a good idea to work off of examples in the existing tests.
+
+The current supported workers are:
+	rdseq:      read sequential
+	rdseq.dir:  read sequential (direct)
+	rdrand:     read random
+	wrseq:      write sequential (buffered)
+	wrseq.sync: write synchronous (buffered)
+	wrseq.dir:  write sequential (direct)
+
+A full description of the experiment grammar is in
+blkcgroup_test_lib.py.
+
+
+In addition to the list of experiments, there are some arguments passed to the
+test harness:
+workvol: the volume where test files will be created.
+
+seq_read_mb: Size in megabytes, of input files used for rdseq workers.
+	     Scales the overall time duration of all tests. For instance, if a
+	     container has N identical workers, each uses a separate file of
+	     size 1/N. For other worker types, their input or output file size
+	     is automatically scaled to a related size that takes roughly
+	     the same elapsed time as does rdseq reading seq_read_mb.
+
+TODO
+====
+We plan on adding new features to this test soon, including
+  - support for split hierarchies
+  - more worker types
+  - more tests
+  - better control over blkio settings, like group_isolation.
