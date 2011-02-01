@@ -313,8 +313,8 @@ def actual_disk_device(ldevice):
     raise ValueError("Could not find mapping for %s" % ldevice)
 
 
-def device_holding_file(file):
-    mountpoint = os.path.abspath(file)
+def device_holding_file(filename):
+    mountpoint = os.path.abspath(filename)
 
     # Iterate over the path until we get the mount point.
     while not os.path.ismount(mountpoint):
@@ -328,7 +328,7 @@ def device_holding_file(file):
             partition = parts[0][5:]
             device = partition.rstrip('0123456789')
             return device
-    raise ValueError
+    raise ValueError("Could not find device holding %s" % filename)
 
 
 def enable_blkio_and_cfq_on_device(device):
