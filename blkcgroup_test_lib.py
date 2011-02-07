@@ -331,7 +331,7 @@ def device_holding_file(filename):
     raise ValueError("Could not find device holding %s" % filename)
 
 
-def enable_blkio_and_cfq_on_device(device):
+def enable_blkio_and_cfq(device):
     """Enable blkio and cfq, when not done by boot command."""
     # Ensure that the required device is valid block device.
     disk = os.path.join('/sys/block', device)
@@ -350,6 +350,28 @@ def enable_blkio_and_cfq_on_device(device):
 
     logging.info('Enabling cfq scheduler on drive %s', device)
     utils.write_one_line(file, 'cfq')
+
+    if not os.path.exists('/dev/cgroup/blkio.weight'):
+        raise error.Error('Kernel hasn\'t implemented blkio.weight')
+
+
+def set_group_isolation(device, value):
+    """Set the group_isolation setting for a device."""
+    disk = os.path.join('/sys/block', device)
+    if not os.path.exists(disk):
+        raise error.Error('Machine does not have disk device ' + device)
+    filename = os.path.join(disk, 'queue/iosched/group_isolation')
+    logging.debug('Setting group_isolation for %s to %s' % (device, value))
+    utils.write_one_line(filename, value)
+
+
+def get_group_isolation(device):
+    """Get the group_isolation setting for a device."""
+    disk = os.path.join('/sys/block', device)
+    if not os.path.exists(disk):
+        raise error.Error('Machine does not have disk device ' + device)
+    filename = os.path.join(disk, 'queue/iosched/group_isolation')
+    return utils.read_one_line(filename)
 
 
 class test_harness(object):
@@ -589,14 +611,6 @@ class test_harness(object):
         release_containers(exper)
 
 
-    def enable_blkio_and_cfq(self):
-        """Sense kernel blkio support and enable cfq."""
-        enable_blkio_and_cfq_on_device(self.device)
-
-        if not os.path.exists('/dev/cgroup/blkio.weight'):
-            raise error.Error('Kernel hasn\'t implemented blkio.weight')
-
-
     def run_experiments(self, experiments, seq_read_mb, workvol,
                         kill_slower=False, timeout='',
                         pre_experiment_cb=None,
@@ -663,7 +677,10 @@ class test_harness(object):
         else:
           self.device = device_holding_file(workvol)
 
-        self.enable_blkio_and_cfq()  # in case booted without
+        enable_blkio_and_cfq(self.device)
+        old_group_isolation = get_group_isolation(self.device)
+        set_group_isolation(self.device, '1')
+
         logging.debug('Measuring IO on disk %s', self.device)
 
         # Setup test specific parameters.
@@ -692,3 +709,4 @@ class test_harness(object):
 
         # Cleanup.
         utils.system('rm -rf %s' % self.workdir)
+        set_group_isolation(self.device, old_group_isolation)
