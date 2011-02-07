@@ -46,8 +46,9 @@ TEST_CGROUP_PREFIX = 'blkcgroupt'
 
 def usage(argv):
     """Prints usage information to stderr."""
-    sys.stderr.write('%s [-ch]: Runs a blkcgroup isolation test\n'
+    sys.stderr.write('%s [-cgh]: Runs a blkcgroup isolation test\n'
                      '-c: Cleans test data before running\n'
+                     '-g: Adds Google-specific support code\n'
                      '-h: Prints help information\n' % argv[0])
 
 
@@ -614,8 +615,7 @@ class test_harness(object):
     def run_experiments(self, experiments, seq_read_mb, workvol,
                         kill_slower=False, timeout='',
                         pre_experiment_cb=None,
-                        post_experiment_cb=None,
-                        google_hacks=False):
+                        post_experiment_cb=None):
         """Execute a previously-generated list of experiments.
 
         experiments: a list of (string, number) tuples to run as tests.
@@ -636,20 +636,22 @@ class test_harness(object):
                            experiment. Must take a list of cgroup names.
         post_experiment_cb: Callback to run after experiment, before container
                             deletion. Must take a list of cgroup names.
-        google_hacks: Google-specific hacks for device lookup
         """
 
         try:
-            opts, args = getopt.getopt(sys.argv[1:], 'ch', ['help'])
+            opts, args = getopt.getopt(sys.argv[1:], 'cgh', ['help'])
         except getopt.GetoptError, err:
             print str(err)
             usage(sys.argv)
             sys.exit(2)
 
         cleanup = False
+        google_hacks = False
         for o, a in opts:
             if o == '-c':
                 cleanup = True
+            elif o == '-g':
+                google_hacks = True
             elif o in ('-h', '--help'):
                 usage(sys.argv)
                 sys.exit()
