@@ -600,7 +600,8 @@ class test_harness(object):
     def run_experiments(self, experiments, seq_read_mb, workvol,
                         kill_slower=False, timeout='',
                         pre_experiment_cb=None,
-                        post_experiment_cb=None):
+                        post_experiment_cb=None,
+                        google_hacks=False):
         """Execute a previously-generated list of experiments.
 
         experiments: a list of (string, number) tuples to run as tests.
@@ -621,6 +622,7 @@ class test_harness(object):
                            experiment. Must take a list of cgroup names.
         post_experiment_cb: Callback to run after experiment, before container
                             deletion. Must take a list of cgroup names.
+        google_hacks: Google-specific hacks for device lookup
         """
 
         try:
@@ -656,7 +658,10 @@ class test_harness(object):
             utils.system('rm -rf %s/*' % self.workdir)
 
         # Get get the underlying device name where the workvol is located.
-        self.device = actual_disk_device(device_holding_file(workvol))
+        if google_hacks:
+          self.device = actual_disk_device(device_holding_file(workvol))
+        else:
+          self.device = device_holding_file(workvol)
 
         self.enable_blkio_and_cfq()  # in case booted without
         logging.debug('Measuring IO on disk %s', self.device)
