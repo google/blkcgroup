@@ -1,0 +1,152 @@
+#!/usr/bin/python
+
+import os
+import sys
+import time
+import errno
+import random
+import signal
+import subprocess
+
+def parse_mems(strmems):
+  mems = set()
+  ranges = strmems.split(',')
+  for range_ in ranges:
+    if '-' in range_:
+      begin, end = range_.split('-')
+      mems |= set(range(int(begin), int(end)+1))
+    else:
+      mems.add(int(range_))
+
+  return mems
+
+class Container(object):
+  CGROUP_MNT = '/dev/cgroup'
+
+  def __init__(self, name):
+    self.path = os.path.join(Container.CGROUP_MNT, name)
+
+  def create(self):
+    try:
+      os.mkdir(self.path)
+    except OSError, e:
+      raise
+
+  def delete(self):
+    try:
+      os.rmdir(self.path)
+    except OSError, e:
+      raise
+
+  def set_io_weight(self, weight):
+    service_level = open(os.path.join(self.path, 'blkio.weight'), 'w')
+    service_level.write('%d' % weight)
+    service_level.close()
+
+  def set_io_service_level(self, device, svc_class, share):
+    service_level = open(os.path.join(self.path, 'blkio.io_service_level'), 'w')
+    service_level.write('%s %d 0 %d\n' % (device, svc_class, share))
+    service_level.close()
+
+  def set_mems(self, nodes):
+    mems = open(os.path.join(self.path, 'cpuset.mems'), 'w')
+    mems.write(','.join([str(node) for node in nodes]) + '\n')
+    mems.close()
+
+  def get_mems(self):
+    return parse_mems(open(os.path.join(self.path, 'cpuset.mems'), 'r').read())
+
+  def set_cpus(self, cpuset_cpus):
+    cpus = open(os.path.join(self.path, 'cpuset.cpus'), 'w')
+    # allow all cpus for now
+    cpus.write('0')
+    cpus.close()
+
+  def swallow_pid(self, pid):
+    open(os.path.join(self.path, 'tasks'), 'w').write('%d\n' % pid)
+
+  def empty_container(self):
+    lines = open(os.path.join(self.path, 'tasks')).read().split('\n')
+    root_tasks = open(os.path.join(CGROUP_MNT, 'tasks'), 'wb')
+    for line in lines:
+      root_tasks.write(line)
+
+
+class Task(object):
+  def __init__(self):
+    self.pid = None
+
+  def launch_test(self, container):
+    pid = os.fork()
+    if pid == 0:
+      # child
+      container.swallow_pid(os.getpid())
+      self.exec_test()
+      # doesn't return
+    else:
+      self.pid = pid
+    return pid
+
+  def exec_test(self):
+    # FIXME ctalbott - magic number could be gotten by size of device
+    ## blocknum = random.randint(0, 2879)
+    ## print 'seeking to %d' % blocknum
+    ## os.execlp('dd', 'dd', 'if=/dev/sda', 'of=/dev/null', 'bs=256K',
+    ##           'skip=%d' % blocknum, 'count=100')
+    blocknum = random.randint(0, 1800000)
+    print 'seeking to %d' % blocknum
+    os.execlp('dd', 'dd', 'if=/dev/zero', 'of=/data/bigfile', 'bs=256K',
+              'seek=%d' % blocknum, 'count=2000', 'conv=notrunc', 'oflag=direct')
+
+  def wait(self):
+    pid = self.pid
+    while 1:
+      wpid, sts = os.waitpid(pid, 0)
+      if os.WIFSTOPPED(sts):
+        continue
+      elif os.WIFSIGNALED(sts):
+        print >>sys.stderr, 'child %d received %d' % (pid, os.WTERMSIG(sts))
+        return -os.WTERMSIG(sts)
+      elif os.WIFEXITED(sts):
+        return os.WEXITSTATUS(sts)
+      else:
+        raise error, "Not stopped, signaled or exited???"
+
+  def kill(self, sig):
+    os.kill(self.pid, sig)
+
+
+def main(args):
+  name = 'fuzzcon_%x' % random.getrandbits(4*32)
+  root = Container('')
+  rootmems = root.get_mems()
+
+  container = Container(name)
+  container.create()
+  try:
+    container.set_mems(rootmems)
+    container.set_cpus([])
+    print 'set first service level'
+    container.set_io_weight(100)
+    task = Task()
+    try:
+      print 'launch test'
+      task.launch_test(container)
+      time.sleep(2)
+      print 'set second service level'
+      container.set_io_weight(200)
+      time.sleep(2)
+    finally:
+      task.kill(signal.SIGTERM)
+      print 'waiting'
+      print task.wait()
+      print 'done waiting'
+  finally:
+    # should blow up here
+    print 'removing container'
+    container.delete()
+
+
+
+if __name__ == '__main__':
+  main(sys.argv)
