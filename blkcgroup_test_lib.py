@@ -207,10 +207,15 @@ def measure_containers(tree, device, timevals):
 
     """
     for container in tree:
+        found_data = False
         for line in container['blkio_cgroup'].get_attr('time'):
             parts = line.split()
             if parts[0] == device:
                 timevals[container['name']] = int(parts[-1])
+                found_data = True
+        if not found_data:
+            raise error.Error('Could not find time value for device %s, '
+                              'container %s.' % (device, container['name']))
 
 
 def release_containers(exper):
