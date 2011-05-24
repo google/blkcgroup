@@ -47,6 +47,7 @@ def discover_container_style():
             mem_isolation_on = fake_numa_containers = True
         else:  # memcg containers IFF compiled-in & mounted & non-fakenuma boot
             fake_numa_containers = False
+            #TODO(teravest): Fix this to detect correct mounting.
             mem_isolation_on = os.path.exists(
                     '/dev/cgroup/memory.limit_in_bytes')
             # TODO: handle possibility of where memcg is mounted as its own

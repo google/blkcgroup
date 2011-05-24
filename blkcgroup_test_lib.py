@@ -39,6 +39,7 @@ import cgroup, cpuset, error, utils
 # significantly smaller than test files so we can have adequate memory pressure
 # to force there to be disk traffic.
 CONTAINER_MBYTES = 360
+NODE_MBYTES = 120
 
 MAX_VALID_WEIGHT = 1000 # kernel limits the max value to be 1000 (min to 100)
 
@@ -61,7 +62,11 @@ def delete_test_containers():
     for r in ('cpuset', 'io'):
         cgroups = glob.glob('/dev/cgroup/%s/%s*' % (r, TEST_CGROUP_PREFIX))
         for cgroup in cgroups:
-            os.rmdir(cgroup)
+          igroups = glob.glob('%s/%s*' %
+                              (cgroup, TEST_CGROUP_PREFIX))
+          for igroup in igroups:
+            os.rmdir(igroup)
+          os.rmdir(cgroup)
 
 
 def setup_logging(debug=False):
@@ -125,6 +130,14 @@ def parse_containers(text):
             container['worker'] = worker
         container['worker_repeat'] = repeat
 
+        # Parse the containers within the nested group.
+        # We only support one level of nesting.
+        inner = []
+        if text[0] == '(':
+            inner, text = parse_containers(text[1:])
+            text = expect_delim(text.lstrip(), ')').lstrip()
+        container['nest'] = inner
+
         containers.append(container)
         if text[0] != ',':
             break
@@ -140,14 +153,14 @@ def parse_experiment(text):
 
 
 def plan_container_size(container):
-    """Returns the target memory size of a given container.
-
-    There will be more logic here once we have to deal with nested containers.
-    """
+    """Returns the target memory size of a given container."""
+    mbytes = 0
     if 'worker' in container:
-        return CONTAINER_MBYTES
-    else:
-      return 0
+        mbytes += CONTAINER_MBYTES
+    for c in container['nest']:
+        mbytes += plan_container_size(c)
+        mbytes += NODE_MBYTES
+    return mbytes
 
 
 def setup_container(container, cname, device,
@@ -198,13 +211,14 @@ def setup_containers(tree, device,
        needed for one experiment.  my_*_parent describe the existing cpu
        cgroup and io cgroup of this subtree's parent container.
     """
-    container_names = []
     for i, container in enumerate(tree):
         # Create next sibling container at this level
         setup_container(container, '%s%d' % (TEST_CGROUP_PREFIX, i), device,
                         root_name, my_cpu_parent, my_blkio_parent)
-        container_names.append('%s%d' % (TEST_CGROUP_PREFIX, i))
-    return container_names
+
+        setup_containers(container['nest'], device,
+                         root_name, container['cpu_cgroup'],
+                         container['blkio_cgroup'])
 
 
 def measure_containers(tree, device, timevals):
@@ -221,6 +235,8 @@ def measure_containers(tree, device, timevals):
         if not found_data:
             raise error.Error('Could not find time value for device %s, '
                               'container %s.' % (device, container['name']))
+        # Recurse to nested containers.
+        measure_containers(container['nest'], device, timevals)
 
 
 def release_containers(exper):
@@ -251,7 +267,12 @@ def score_max_error(tree, timevals):
         actual_weights_str += '%d' % actual_weight
         error = abs(actual_weight - int(container['dtf']))
         maxerr = max(maxerr, error)
+
+        error, inner_w = score_max_error(container['nest'], timevals)
+        if inner_w:
+          actual_weights_str += ' [%s]' % inner_w
         actual_weights_str += ', '
+        maxerr = max(maxerr, error)
 
     actual_weights_str = actual_weights_str[:-2]  # Clip off last ', '
     return maxerr, actual_weights_str
@@ -368,25 +389,6 @@ def enable_blkio_and_cfq(device):
         raise error.Error('Kernel hasn\'t implemented blkio.weight')
 
 
-def set_group_isolation(device, value):
-    """Set the group_isolation setting for a device."""
-    disk = os.path.join('/sys/block', device)
-    if not os.path.exists(disk):
-        raise error.Error('Machine does not have disk device ' + device)
-    filename = os.path.join(disk, 'queue/iosched/group_isolation')
-    logging.debug('Setting group_isolation for %s to %s' % (device, value))
-    utils.write_one_line(filename, value)
-
-
-def get_group_isolation(device):
-    """Get the group_isolation setting for a device."""
-    disk = os.path.join('/sys/block', device)
-    if not os.path.exists(disk):
-        raise error.Error('Machine does not have disk device ' + device)
-    filename = os.path.join(disk, 'queue/iosched/group_isolation')
-    return utils.read_one_line(filename)
-
-
 class test_harness(object):
     def __init__(self, title):
         self.title = title
@@ -491,7 +493,7 @@ class test_harness(object):
         return cmd
 
 
-    def setup_worker_files(self, seq_read_mb, tree, key_prefix):
+    def setup_worker_files(self, seq_read_mb, tree):
         """Recursive top-down walk over an experiment's tree of containers,
            setting up the input data files needed by IO workers, and collecting
            the shell commands that will launch those workers.
@@ -501,7 +503,6 @@ class test_harness(object):
         """
         for c, container in enumerate(tree):
             cname = '%s%d' % (TEST_CGROUP_PREFIX, c)
-            container_key = '%s%s' % (key_prefix, cname)
             cmds = []
             mult = container['worker_repeat']
             for w in xrange(mult):
@@ -510,6 +511,7 @@ class test_harness(object):
                 cmd = self.setup_worker(container['worker'], per_worker_mbytes)
                 cmds.append(cmd)
             container['worker_cmds'] = cmds
+            self.setup_worker_files(seq_read_mb, container['nest'])
 
 
     def enum_worker_runners(self, tree, pids_file, timeout):
@@ -524,6 +526,12 @@ class test_harness(object):
                     tasks.append([cmd,
                                   container['cpu_cgroup'],
                                   container['blkio_cgroup'],  pids_file])
+
+            # Timeout is empty here because we don't want to recursively
+            # add the sleep code.
+            tasks.extend(self.enum_worker_runners(container['nest'],
+                                                  pids_file, ''))
+
         if pids_file and timeout:
             # add pseudo worker to 1st container to timeout all workers,
             # shortens experiment when fastest worker was given low DTF share
@@ -567,13 +575,12 @@ class test_harness(object):
 
         # Given the experiment parameters generate a exper map based off the
         # tests grammar.
-        exper_key = 'x%d' % exper_num
         exper = parse_experiment(experiment)
 
         # Generate user space commands to be executed per worker.
         logging.info('Creating initial file set.')
         self.input_file_count = self.output_file_count = 0
-        self.setup_worker_files(seq_read_mb, exper, exper_key + '-')
+        self.setup_worker_files(seq_read_mb, exper)
         if kill_slower:
             pids_file = os.path.join(self.workdir, 'pids_file')
             remove_file(pids_file)
@@ -592,10 +599,8 @@ class test_harness(object):
                      ' parent_blkio_cgroup: ' + parent_blkio_cgroup.path)
 
         logging.info('Create all required containers.')
-        container_names = setup_containers(exper, self.device,
+        setup_containers(exper, self.device,
             parent_cpu_cgroup.name, parent_cpu_cgroup, parent_blkio_cgroup)
-        if pre_experiment_cb:
-            pre_experiment_cb(container_names)
 
         # Add all required workers  & parameters to the tasks list.
         runners = self.enum_worker_runners(exper, pids_file, timeout)
@@ -620,9 +625,6 @@ class test_harness(object):
         if passing:
             self.passed_experiments += 1
         self.tried_experiments += 1
-
-        if post_experiment_cb:
-            post_experiment_cb(container_names)
 
         self.remove_output_files()
         release_containers(exper)
@@ -692,14 +694,10 @@ class test_harness(object):
         # Get get the underlying device name where the workvol is located.
         if google_hacks:
           self.device = actual_disk_device(device_holding_file(workvol))
-          BLKIO_CGROUP_NAME = 'io'
         else:
           self.device = device_holding_file(workvol)
-          BLKIO_CGROUP_NAME = 'blkio'
 
         enable_blkio_and_cfq(self.device)
-        old_group_isolation = get_group_isolation(self.device)
-        set_group_isolation(self.device, '1')
 
         logging.debug('Measuring IO on disk %s', self.device)
 
@@ -729,4 +727,3 @@ class test_harness(object):
 
         # Cleanup.
         utils.system('rm -rf %s' % self.workdir)
-        set_group_isolation(self.device, old_group_isolation)
