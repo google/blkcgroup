@@ -38,7 +38,8 @@ def discover_container_style():
     if super_root_path != '':
         return  # already looked up
 
-    if os.path.exists('/dev/cgroup/tasks'):
+    if os.path.exists('/dev/cgroup/tasks') or \
+       os.path.exists('/dev/cgroup/cpuset/tasks'):
         # running on 2.6.26 or later kernel with containers on:
         super_root_path = '/dev/cgroup'
         cpuset_prefix = 'cpuset.'
@@ -104,7 +105,7 @@ def cpuset_attr(container_name, attr):
 def blkio_attr(container_name, attr):
     discover_container_style()
     # current version assumes shared cgroup hierarchy
-    return os.path.join(super_root_path, container_name, 'blkio.'+attr)
+    return os.path.join(super_root_path, container_name, 'io.'+attr)
 
 
 def tasks_path(container_name):
@@ -307,14 +308,16 @@ def set_blkio_controls(container_name, device, blkio_shares):
         blkio_shares = user specified share (100-1000) for the blkio subsystem.
     """
     # Setup path to blkio cgroup.
-    weight_device = blkio_attr(container_name, 'weight_device')
+    # weight_device = blkio_attr(container_name, 'weight_device')
+    weight_device = blkio_attr(container_name, 'io_service_level')
+    logging.info('weight device: ' + weight_device)
     if not os.path.exists(weight_device):
         raise error.Error("Kernel predates blkio features or blkio "
                           "cgroup is mounted separately from cpusets")
 
     # Gather the "major:minor dtf" values.
     weight = blkio_shares
-    disk_info = '%s %s' % (utils.get_device_id(device), weight)
+    disk_info = '%s 2 0 %s' % (device, weight / 10)
 
     # Add entry to the cgroup.
     utils.write_one_line(weight_device, disk_info)
@@ -386,57 +389,74 @@ def create_container_directly(name, mbytes, cpus):
         create_container_via_memcg(name, parent, mbytes<<20, cpus)
 
 
-def create_container_with_mbytes_and_specific_cpus(device, name, mbytes,
-                                                   cpus=None, root=SUPER_ROOT,
-                                                   blkio_shares=None,
-                                                   move_in=True, timeout=0):
-        """Create a cpuset container and move job's current pid into it.
-        Allocate the list "cpus" of cpus to that container
+def create_container_cpuset(name, tree, mbytes, cpus=None, root=SUPER_ROOT):
+    """Create a cpuset container and move job's current pid into it.
+    Allocate the list "cpus" of cpus to that container
 
-        Args:
-            device = the device under test.
-            name = arbitrary string tag
-            mbytes = reqested memory for job in megabytes
-            cpus = list of cpu indicies to associate with the cpuset
-                defaults to all cpus avail with given root
-            root = the parent cpuset to nest this new set within
-                '': unnested top-level container
-            blkio_shares = user specified share for the blkio subsystem
-            move_in = True: Move current process into the new container now.
-            timeout = must be 0: persist until explicitly deleted.
+    Args:
+        name = arbitrary string tag
+        tree = cgroup tree
+        mbytes = reqested memory for job in megabytes
+        cpus = list of cpu indicies to associate with the cpuset
+            defaults to all cpus avail with given root
+        root = the parent cpuset to nest this new set within
+            '': unnested top-level container
+    Return:
+        name: the name of the container.
+    """
+    need_mem_containers()
+    root = os.path.join(tree, root)
+    if not container_exists(root):
+        raise error.Error('Parent container "%s" does not exist' % root)
+    if cpus is None:
+        # default to biggest container we can make under root
+        cpus = get_cpus(root)
+    else:
+        cpus = set(cpus)  # interface uses list
+    if not cpus:
+        raise error.Error('Creating container with no cpus')
 
-        Return:
-            name: the name of the container.
-        """
-        if not blkio_shares:
-            raise error.ValueError('blkio_shares not defined.')
+    cname = os.path.join(root, name)  # path relative to super_root
+    if os.path.exists(full_path(cname)):
+        raise error.Error('Container %s already exists. '
+                          'Try running test with -c which deletes '
+                          'test state.' % name)
+    create_container_directly(cname, mbytes, cpus)
+    return name
 
-        # Initialize memory container.
-        need_mem_containers()
-        if not container_exists(root):
-            raise error.Error('Parent container "%s" does not exist' % root)
-        if cpus is None:
-            # default to biggest container we can make under root
-            cpus = get_cpus(root)
-        else:
-            cpus = set(cpus)  # interface uses list
-        if not cpus:
-            raise error.Error('Creating container with no cpus')
-        name = os.path.join(root, name)  # path relative to super_root
-        if os.path.exists(full_path(name)):
-            raise error.Error('Container %s already exists. '
-                              'Try running test with -c which deletes '
-                              'test state.' % name)
-        create_container_directly(name, mbytes, cpus)
 
-        # Initialize blkio container.
-        set_blkio_controls(name, device, blkio_shares)
+def create_container_blkio(device, name, tree,
+                           root=SUPER_ROOT, blkio_shares=None):
+    """Create a cpuset container and move job's current pid into it.
+    Allocate the list "cpus" of cpus to that container
 
-        # Move pid into container.
-        if move_in:
-            move_self_into_container(name)
+    Args:
+        device = the device under test.
+        name = arbitrary string tag
+        tree = cgroup tree
+        root = the parent cpuset to nest this new set within
+            '': unnested top-level container
+        blkio_shares = user specified share for the blkio subsystem
+    Return:
+        name: the name of the container.
+    """
+    if not blkio_shares:
+        raise error.ValueError('blkio_shares not defined.')
 
-        return name
+    root = os.path.join(tree, root)
+
+    cname = os.path.join(root, name)  # path relative to super_root
+    if os.path.exists(full_path(cname)):
+        raise error.Error('Container %s already exists. '
+                          'Try running test with -c which deletes '
+                          'test state.' % cname)
+
+    os.mkdir(full_path(cname))
+
+    # Initialize blkio container.
+    set_blkio_controls(cname, device, blkio_shares)
+
+    return name
 
 
 def get_boot_numa():

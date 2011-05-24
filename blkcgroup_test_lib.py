@@ -44,6 +44,10 @@ MAX_VALID_WEIGHT = 1000 # kernel limits the max value to be 1000 (min to 100)
 
 TEST_CGROUP_PREFIX = 'blkcgroupt'
 
+# Keyed off the value of google_hacks. We set this to 'io' internally.
+# TODO(teravest): Set this up from kernel version instead.
+BLKIO_CGROUP_NAME = 'io'
+
 def usage(argv):
     """Prints usage information to stderr."""
     sys.stderr.write('%s [-cgh]: Runs a blkcgroup isolation test\n'
@@ -54,9 +58,10 @@ def usage(argv):
 
 def delete_test_containers():
     """Deletes all test containers that could be created by this test."""
-    cgroups = glob.glob('/dev/cgroup/%s*' % TEST_CGROUP_PREFIX)
-    for cgroup in cgroups:
-        os.rmdir(cgroup)
+    for r in ('cpuset', 'io'):
+        cgroups = glob.glob('/dev/cgroup/%s/%s*' % (r, TEST_CGROUP_PREFIX))
+        for cgroup in cgroups:
+            os.rmdir(cgroup)
 
 
 def setup_logging(debug=False):
@@ -158,14 +163,14 @@ def setup_container(container, cname, device,
     # Create a new cpus+mem cgroup, below my_cpu_parent:
     mbytes = plan_container_size(container)
     blkio_shares = container['dtf']
-    # TODO: extend or replace create_container with support for
-    #       separately-mounted io cgroups
-    if not my_io_parent.cpuset_hierarchy:
-        raise ValueError, ('cpuset does not yet support '
-                           'separate mount of io cgroups')
-    path = cpuset.create_container_with_mbytes_and_specific_cpus(
-                   device, cname, root=my_cpu_parent.name, mbytes=mbytes,
-                   blkio_shares=blkio_shares, move_in=False, timeout=0)
+
+    path = cpuset.create_container_cpuset(
+                   cname, 'cpuset', root=my_cpu_parent.name, mbytes=mbytes)
+
+    blk_path = cpuset.create_container_blkio(
+                   device, cname, 'io',
+                   root=my_io_parent.name, blkio_shares=blkio_shares)
+    logging.info( "path: " + path + " blk_path: " + blk_path)
 
     # Setup a view.
     cpu_cgroup = cgroup.cgroup('cpuset', path)
@@ -173,7 +178,7 @@ def setup_container(container, cname, device,
     if my_io_parent.cpuset_hierarchy:
         # Io subsystem is being controlled via main cpuset cgroup hierarchy
         # blkio_cgroup is a 2nd view of the same cpu/mem cgroup just created
-        blkio_cgroup = cgroup.cgroup('blkio', path)
+        blkio_cgroup = cgroup.cgroup('io', path)
     else:
         # Io subsystem has its own cgroup hierarchy, separate from cpuset
         # create a new cgroup, below my_io_parent in Io's hierarchy
@@ -208,9 +213,9 @@ def measure_containers(tree, device, timevals):
     """
     for container in tree:
         found_data = False
-        for line in container['blkio_cgroup'].get_attr('time'):
+        for line in container['blkio_cgroup'].get_attr('io_service_time'):
             parts = line.split()
-            if parts[0] == device:
+            if parts[0] == device and parts[1] == 'Total':
                 timevals[container['name']] = int(parts[-1])
                 found_data = True
         if not found_data:
@@ -289,6 +294,8 @@ def kill_slower_workers(fast_pid, cpu_cgroup, pids_file):
 def run_worker(cmd, cpu_cgroup, blkio_cgroup, pids_file):
     # main of new process for running an independent worker shell
     logging.debug('Worker running command: %s' % cmd)
+    logging.info('Moving to cpu_cgroup: %s' % cpu_cgroup.name)
+    logging.info('Moving to blkio_cgroup: %s' % blkio_cgroup.name)
     cpu_cgroup.move_my_task_here()
     blkio_cgroup.move_my_task_here()
     p = subprocess.Popen(cmd.split(),
@@ -345,7 +352,7 @@ def enable_blkio_and_cfq(device):
         raise error.Error('Machine does not have disk device ' + device)
 
     # Ensure the io cgroup is mounted.
-    if not cgroup.mount_point('blkio'):
+    if not cgroup.mount_point(BLKIO_CGROUP_NAME):
         raise error.Error('Kernel not compiled with blkio support')
 
     # Enable cfq scheduling on the block device.
@@ -514,7 +521,7 @@ class test_harness(object):
         for container in tree:
             for cmd in container['worker_cmds']:
                 if cmd:
-                    tasks.append([run_worker, cmd,
+                    tasks.append([cmd,
                                   container['cpu_cgroup'],
                                   container['blkio_cgroup'],  pids_file])
         if pids_file and timeout:
@@ -522,7 +529,7 @@ class test_harness(object):
             # shortens experiment when fastest worker was given low DTF share
             cmd = 'sleep %s' % timeout
             container = tree[0]
-            tasks.append([run_worker, cmd, container['cpu_cgroup'],
+            tasks.append([cmd, container['cpu_cgroup'],
                           container['blkio_cgroup'], pids_file])
         return tasks
 
@@ -532,8 +539,8 @@ class test_harness(object):
         sys.stderr.flush()
         pids = []
         for task in runners:
-            run_worker = task[0]
-            args = task[1:]
+            args = task
+            logging.info('running worker args: %s' % args)
             pid = os.fork()
             if not pid:  # we are child process
                 try:
@@ -579,7 +586,10 @@ class test_harness(object):
 
         # Generate class cgroup_access objects or cpuset and blkio.
         parent_cpu_cgroup = cgroup.root_cgroup('cpuset')
-        parent_blkio_cgroup  = cgroup.root_cgroup('blkio')
+        parent_blkio_cgroup  = cgroup.root_cgroup(BLKIO_CGROUP_NAME)
+
+        logging.info('parent_cpu_cgroup: ' + parent_cpu_cgroup.path +
+                     ' parent_blkio_cgroup: ' + parent_blkio_cgroup.path)
 
         logging.info('Create all required containers.')
         container_names = setup_containers(exper, self.device,
@@ -601,7 +611,8 @@ class test_harness(object):
         logging.info('Experiment completed in %.1f seconds', seconds_elapsed)
 
         timevals = {}
-        measure_containers(exper, utils.get_device_id(self.device), timevals)
+        # measure_containers(exper, utils.get_device_id(self.device), timevals)
+        measure_containers(exper, self.device, timevals)
 
         # Score the experiment.
         logging.debug('Scoring the experiment.')
@@ -681,8 +692,10 @@ class test_harness(object):
         # Get get the underlying device name where the workvol is located.
         if google_hacks:
           self.device = actual_disk_device(device_holding_file(workvol))
+          BLKIO_CGROUP_NAME = 'io'
         else:
           self.device = device_holding_file(workvol)
+          BLKIO_CGROUP_NAME = 'blkio'
 
         enable_blkio_and_cfq(self.device)
         old_group_isolation = get_group_isolation(self.device)

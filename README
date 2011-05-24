@@ -34,7 +34,8 @@ CONFIG_CFQ_GROUP_IOSCHED=y
 
 1. Blkio controller.
 The blkio controller must be set up properly. This can be simply done:
-  $ mount -t cgroup -o cpuset,blkio none /dev/cgroup
+  $ mount -t cgroup -o cpuset none /dev/cgroup/cpuset
+  $ mount -t cgroup -o io none /dev/cgroup/io
 
 More thorough documentation is at Documentation/cgroups/blkio-controller.txt
 in the kernel tree.

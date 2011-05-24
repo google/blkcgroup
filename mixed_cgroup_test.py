@@ -31,7 +31,7 @@ POST_EXPERIMENT_FILENAME='post-experiment.txt'
 def print_container_data(cgroup_names, filename):
     """Print blkio statistics for our control groups."""
     for cgroup in cgroup_names:
-        os.system('for file in `ls /dev/cgroup/%(c)s/blkio.*`; '
+        os.system('for file in `ls /dev/cgroup/io/%(c)s/io.*`; '
             'do echo $file >> %(f)s; cat $file >> %(f)s; echo >> %(f)s;done'
             % {'c': cgroup, 'f': filename})
 
