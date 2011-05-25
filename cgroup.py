@@ -80,11 +80,6 @@ def root_cgroup(subsystem):
     return cgroup(subsystem, '')
 
 
-def my_cgroup(subsystem):
-    """Get current task's current cgroup for a particular subsystem."""
-    return cgroup(subsystem, my_cgroup_name(subsystem))
-
-
 def cgroup(subsystem, name):
     """Get a cgroup accessor for the subsystem for cgroup name."""
     path = os.path.join(mount_point(subsystem), name)
@@ -119,7 +114,7 @@ class cgroup_accessor(object):
         self.path = path
         self.name = path[len(mount)+1:]
         self.cpuset_hierarchy = mount == mount_point('cpuset')
-        self.subsystem_prefix = subsystem_prefix(subsystem) 
+        self.subsystem_prefix = subsystem_prefix(subsystem)
 
 
     def parent(self):

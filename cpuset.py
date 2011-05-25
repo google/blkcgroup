@@ -94,10 +94,6 @@ def full_path(container_name):
     return os.path.join(super_root_path, container_name)
 
 
-def unpath(container_path):
-    return container_path[len(super_root_path)+1:]
-
-
 def cpuset_attr(container_name, attr):
     discover_container_style()
     return os.path.join(super_root_path, container_name, cpuset_prefix+attr)
@@ -139,13 +135,6 @@ def move_tasks_into_container(name, tasks):
             if utils.pid_is_alive(task):
                 raise   # task exists but couldn't move it
             # task is gone or zombie so ignore this exception
-
-
-def move_self_into_container(name):
-    """Move the current process into the named container."""
-    me = str(os.getpid())
-    move_tasks_into_container(name, [me])
-    logging.debug('running self (pid %s) in container "%s"', me, name)
 
 
 def my_lock(lockname):

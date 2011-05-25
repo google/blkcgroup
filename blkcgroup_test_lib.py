@@ -385,8 +385,6 @@ def enable_blkio_and_cfq(device):
     logging.info('Enabling cfq scheduler on drive %s', device)
     utils.write_one_line(file, 'cfq')
 
-    if not os.path.exists('/dev/cgroup/blkio.weight'):
-        raise error.Error('Kernel hasn\'t implemented blkio.weight')
 
 
 class test_harness(object):
@@ -566,8 +564,7 @@ class test_harness(object):
 
 
     def run_single_experiment(self, exper_num, experiment, seq_read_mb,
-                              kill_slower, timeout, allowed_error,
-                              pre_experiment_cb, post_experiment_cb):
+                              kill_slower, timeout, allowed_error):
         """Run a single experiment involving one round of concurrent execution
            of IO workers in competing containers.
         """
@@ -631,9 +628,7 @@ class test_harness(object):
 
 
     def run_experiments(self, experiments, seq_read_mb, workvol,
-                        kill_slower=False, timeout='',
-                        pre_experiment_cb=None,
-                        post_experiment_cb=None):
+                        kill_slower=False, timeout=''):
         """Execute a previously-generated list of experiments.
 
         experiments: a list of (string, number) tuples to run as tests.
@@ -650,10 +645,6 @@ class test_harness(object):
             Keeps 25_25_25_25% experiment from taking 4x longer than 95_5%.
             This should be set longer than most experiments, and long enough
             to reach steady state and good measurements on all experiments.
-        pre_experiment_cb: Callback to run after container creation, before the
-                           experiment. Must take a list of cgroup names.
-        post_experiment_cb: Callback to run after experiment, before container
-                            deletion. Must take a list of cgroup names.
         """
 
         try:
@@ -717,8 +708,7 @@ class test_harness(object):
         for i, experiment in enumerate(experiments):
             workers, allowed_error = experiment
             self.run_single_experiment(i, workers, seq_read_mb,
-                                       kill_slower, timeout, allowed_error,
-                                       pre_experiment_cb, post_experiment_cb)
+                                       kill_slower, timeout, allowed_error)
 
         # Presenting results.
         logging.info('-----ran %d experiments, %d passed, %d failed',
