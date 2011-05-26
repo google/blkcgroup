@@ -395,24 +395,24 @@ def create_container_cpuset(name, tree, mbytes, cpus=None, root=SUPER_ROOT):
         name: the name of the container.
     """
     need_mem_containers()
-    root = os.path.join(tree, root)
-    if not container_exists(root):
+    croot = os.path.join(tree, root)
+    if not container_exists(croot):
         raise error.Error('Parent container "%s" does not exist' % root)
     if cpus is None:
         # default to biggest container we can make under root
-        cpus = get_cpus(root)
+        cpus = get_cpus(croot)
     else:
         cpus = set(cpus)  # interface uses list
     if not cpus:
         raise error.Error('Creating container with no cpus')
 
-    cname = os.path.join(root, name)  # path relative to super_root
+    cname = os.path.join(croot, name)  # path relative to super_root
     if os.path.exists(full_path(cname)):
         raise error.Error('Container %s already exists. '
                           'Try running test with -c which deletes '
                           'test state.' % name)
     create_container_directly(cname, mbytes, cpus)
-    return name
+    return os.path.join(root, name)
 
 
 def create_container_blkio(device, name, tree,
@@ -433,9 +433,9 @@ def create_container_blkio(device, name, tree,
     if not blkio_shares:
         raise error.ValueError('blkio_shares not defined.')
 
-    root = os.path.join(tree, root)
+    croot = os.path.join(tree, root)
 
-    cname = os.path.join(root, name)  # path relative to super_root
+    cname = os.path.join(croot, name)  # path relative to super_root
     if os.path.exists(full_path(cname)):
         raise error.Error('Container %s already exists. '
                           'Try running test with -c which deletes '
@@ -446,7 +446,7 @@ def create_container_blkio(device, name, tree,
     # Initialize blkio container.
     set_blkio_controls(cname, device, blkio_shares)
 
-    return name
+    return os.path.join(root, name)
 
 
 def get_boot_numa():

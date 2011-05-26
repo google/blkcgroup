@@ -306,9 +306,9 @@ def kill_slower_workers(fast_pid, cpu_cgroup, pids_file):
 
 def run_worker(cmd, cpu_cgroup, blkio_cgroup, pids_file):
     # main of new process for running an independent worker shell
-    logging.info('Worker running command: %s' % cmd)
-    logging.info('Moving to cpu_cgroup: %s' % cpu_cgroup.name)
-    logging.info('Moving to blkio_cgroup: %s' % blkio_cgroup.name)
+    logging.debug('Worker running command: %s' % cmd)
+    logging.debug('Moving to cpu_cgroup: %s' % cpu_cgroup.path)
+    logging.debug('Moving to blkio_cgroup: %s' % blkio_cgroup.path)
     cpu_cgroup.move_my_task_here()
     blkio_cgroup.move_my_task_here()
     p = subprocess.Popen(cmd.split(),
@@ -584,8 +584,7 @@ class test_harness(object):
             pids_file = ''
 
         logging.info('Flush all read/write caches. This could take a minute.')
-        logging.info('FIXME PUT THIS BACK')
-        #utils.drop_caches()
+        utils.drop_caches()
 
         # Generate class cgroup_access objects or cpuset and blkio.
         parent_cpu_cgroup = cgroup.root_cgroup('cpuset')

@@ -30,14 +30,14 @@ EXPERIMENTS = [
 ]
 
 test = blkcgroup_test_lib.test_harness('Single mixed cgroup test')
-blkcgroup_test_lib.setup_logging(debug=False)
+blkcgroup_test_lib.setup_logging(debug=True)
 
-seq_read_mb = 1000
+seq_read_mb = 1500
 timeout = '%ds' % (seq_read_mb // 25)
 
 
 test.run_experiments(experiments=EXPERIMENTS,
                      seq_read_mb=seq_read_mb,
                      workvol=os.getcwd(),
-                     kill_slower=True,
-                     timeout=timeout)
+                     kill_slower=False,
+                     timeout='')
