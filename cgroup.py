@@ -179,38 +179,6 @@ class cgroup_accessor(object):
         self.put_tasks([str(os.getpid())])
 
 
-    def copy_property(self, from_, prefix, attr):
-        """Copy a property from the 'from' cgroup to this cgroup."""
-        values = from_.get_attr(attr, prefix)
-        self.put_attr(attr, values, prefix)
-
-
-    def inherit_properties(self, parent):
-        """Inherit some properties for this cgroup from its parent."""
-        prefix = subsystem_prefix('cpuset')
-        self.copy_property(parent, prefix, 'cpus')
-        self.copy_property(parent, prefix, 'mems')
-        self.copy_property(parent, 'blockio.', 'prios_allowed')
-
-
-    def new(self, name=''):
-        """Create a new cgroup as a child of this, with the given name.
-
-        If a child cgroup with this name already exists, does nothing and
-        logs a warning. Returns an accessor for the new cgroup.
-        """
-        child = self.child(name)
-        if not os.path.exists(child.path):
-            os.mkdir(child.path)
-            if self.cpuset_hierarchy:
-                child.inherit_properties(self)
-            logging.debug('Created cgroup %s', child.path)
-        else:
-            logging.warning('Re-using existing cgroup %s', child.path)
-            # perhaps created for another subsystem in same hierarchy
-        return child
-
-
     def release(self):
         """Destroy this cgroup.
 

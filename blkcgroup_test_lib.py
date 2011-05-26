@@ -27,11 +27,10 @@
 #  TODO:
 #      Add support for io class
 #      Add support for io limiting
-#      Add support for nested containers
 #      Do more testing on non fakenuma systems
 
 
-import getopt, glob, logging, os, re, subprocess, sys, time
+import getopt, glob, logging, os, re, subprocess, sys, time, traceback
 import cgroup, cpuset, error, utils
 
 # Size of allocated containers for workers. We chose 360mb because it's small
@@ -187,15 +186,7 @@ def setup_container(container, cname, device,
 
     # Setup a view.
     cpu_cgroup = cgroup.cgroup('cpuset', path)
-
-    if my_io_parent.cpuset_hierarchy:
-        # Io subsystem is being controlled via main cpuset cgroup hierarchy
-        # blkio_cgroup is a 2nd view of the same cpu/mem cgroup just created
-        blkio_cgroup = cgroup.cgroup('io', path)
-    else:
-        # Io subsystem has its own cgroup hierarchy, separate from cpuset
-        # create a new cgroup, below my_io_parent in Io's hierarchy
-        blkio_cgroup = my_io_parent.new(cname)
+    blkio_cgroup = cgroup.cgroup('io', blk_path)
 
     container['cpu_cgroup'] = cpu_cgroup
     container['blkio_cgroup'] = blkio_cgroup
@@ -233,8 +224,9 @@ def measure_containers(tree, device, timevals):
                 timevals[container['name']] = int(parts[-1])
                 found_data = True
         if not found_data:
-            raise error.Error('Could not find time value for device %s, '
-                              'container %s.' % (device, container['name']))
+            timevals[container['name']] = 0
+            logging.warn('No data for container %s.' % container['name'])
+
         # Recurse to nested containers.
         measure_containers(container['nest'], device, timevals)
 
@@ -314,7 +306,7 @@ def kill_slower_workers(fast_pid, cpu_cgroup, pids_file):
 
 def run_worker(cmd, cpu_cgroup, blkio_cgroup, pids_file):
     # main of new process for running an independent worker shell
-    logging.debug('Worker running command: %s' % cmd)
+    logging.info('Worker running command: %s' % cmd)
     logging.info('Moving to cpu_cgroup: %s' % cpu_cgroup.name)
     logging.info('Moving to blkio_cgroup: %s' % blkio_cgroup.name)
     cpu_cgroup.move_my_task_here()
@@ -323,7 +315,6 @@ def run_worker(cmd, cpu_cgroup, blkio_cgroup, pids_file):
                          stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT)
     if pids_file:
-        # TODO: append to pids_file via a direct python method
         utils.system('echo %d >> %s' % (p.pid, pids_file))
     logging.debug('running "%s" in container %s and io cgroup %s as pid %d',
                   cmd, cpu_cgroup.path, blkio_cgroup.path, p.pid)
@@ -552,6 +543,13 @@ class test_harness(object):
                 try:
                     run_worker(*args)
                 except Exception, e:
+                    exc_type, exc_value, exc_tb = sys.exc_info()
+                    logging.error("*** Traceback:")
+
+                    for line in traceback.format_exception(
+                        exc_type, exc_value, exc_tb):
+                        logging.error(line)
+
                     logging.error('child ended by exception %s', e)
                     sys.exit(1)
                 sys.exit(0)
@@ -586,7 +584,8 @@ class test_harness(object):
             pids_file = ''
 
         logging.info('Flush all read/write caches. This could take a minute.')
-        utils.drop_caches()
+        logging.info('FIXME PUT THIS BACK')
+        #utils.drop_caches()
 
         # Generate class cgroup_access objects or cpuset and blkio.
         parent_cpu_cgroup = cgroup.root_cgroup('cpuset')
@@ -613,7 +612,6 @@ class test_harness(object):
         logging.info('Experiment completed in %.1f seconds', seconds_elapsed)
 
         timevals = {}
-        # measure_containers(exper, utils.get_device_id(self.device), timevals)
         measure_containers(exper, self.device, timevals)
 
         # Score the experiment.
