@@ -39,5 +39,5 @@ timeout = '%ds' % (seq_read_mb // 25)
 test.run_experiments(experiments=EXPERIMENTS,
                      seq_read_mb=seq_read_mb,
                      workvol=os.getcwd(),
-                     kill_slower=False,
-                     timeout='')
+                     kill_slower=True,
+                     timeout=timeout)

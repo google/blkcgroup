@@ -522,12 +522,12 @@ class test_harness(object):
                                                   pids_file, ''))
 
         if pids_file and timeout:
-            # add pseudo worker to 1st container to timeout all workers,
+            # add pseudo worker to root containers to timeout all workers,
             # shortens experiment when fastest worker was given low DTF share
             cmd = 'sleep %s' % timeout
             container = tree[0]
-            tasks.append([cmd, container['cpu_cgroup'],
-                          container['blkio_cgroup'], pids_file])
+            tasks.append([cmd, cgroup.root_cgroup('cpuset'),
+                          cgroup.root_cgroup(BLKIO_CGROUP_NAME), pids_file])
         return tasks
 
 
