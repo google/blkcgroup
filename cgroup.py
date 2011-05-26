@@ -65,16 +65,6 @@ def my_container():
     return container
 
 
-def my_cgroup_name(subsystem):
-    """Get current task's current cgroup handling a particular subsystem."""
-    container = my_container()
-    if subsystem in container:
-        return container[subsystem]
-    else:
-        raise error.Error('Kernel does not support cgroup subsystem %s'
-                          % subsystem)
-
-
 def root_cgroup(subsystem):
     """Get an accessor to the root cgroup, with no subsystem."""
     return cgroup(subsystem, '')
@@ -84,12 +74,6 @@ def cgroup(subsystem, name):
     """Get a cgroup accessor for the subsystem for cgroup name."""
     path = os.path.join(mount_point(subsystem), name)
     return cgroup_accessor(subsystem, path)
-
-
-def cgroup_path(subsystem, name=None):
-    if not name:
-        name = my_cgroup_name(subsystem)
-    return os.path.join(mount_point(subsystem), name)
 
 
 def subsystem_prefix(subsystem):
