@@ -40,4 +40,5 @@ test.run_experiments(experiments=EXPERIMENTS,
                      seq_read_mb=seq_read_mb,
                      workvol=os.getcwd(),
                      kill_slower=True,
-                     timeout=timeout)
+                     timeout=timeout,
+                     csv_output='results.csv')

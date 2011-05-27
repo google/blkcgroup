@@ -270,7 +270,8 @@ def score_max_error(tree, timevals):
     return maxerr, actual_weights_str
 
 
-def score_experiment(exper_num, exper, timevals, allowed_err):
+def score_experiment(exper_num, experiment, exper, timevals, allowed_err,
+                     csv_output_file):
     maxerr_weight, actual_weights  = score_max_error(exper, timevals)
     logging.info('experiment %d achieved DTFs: %s', exper_num, actual_weights)
 
@@ -285,6 +286,12 @@ def score_experiment(exper_num, exper, timevals, allowed_err):
     logging.info('experiment %d %s: max observed error is %d, '
                  'allowed is %d',
                  exper_num, status, maxerr_weight, allowed_err)
+
+    if csv_output_file:
+        csv_output_file.write('%d; %s; %d; %d\n' %
+                              (exper_num, experiment, maxerr_weight,
+                               allowed_err))
+
 
     return passing
 
@@ -562,7 +569,8 @@ class test_harness(object):
 
 
     def run_single_experiment(self, exper_num, experiment, seq_read_mb,
-                              kill_slower, timeout, allowed_error):
+                              kill_slower, timeout, allowed_error,
+                              csv_output_file):
         """Run a single experiment involving one round of concurrent execution
            of IO workers in competing containers.
         """
@@ -615,7 +623,9 @@ class test_harness(object):
 
         # Score the experiment.
         logging.debug('Scoring the experiment.')
-        passing = score_experiment(exper_num, exper, timevals, allowed_error)
+        passing = score_experiment(exper_num, experiment,
+                                   exper, timevals, allowed_error,
+                                   csv_output_file)
         if passing:
             self.passed_experiments += 1
         self.tried_experiments += 1
@@ -625,7 +635,8 @@ class test_harness(object):
 
 
     def run_experiments(self, experiments, seq_read_mb, workvol,
-                        kill_slower=False, timeout=''):
+                        kill_slower=False, timeout='',
+                        csv_output=None):
         """Execute a previously-generated list of experiments.
 
         experiments: a list of (string, number) tuples to run as tests.
@@ -642,6 +653,7 @@ class test_harness(object):
             Keeps 25_25_25_25% experiment from taking 4x longer than 95_5%.
             This should be set longer than most experiments, and long enough
             to reach steady state and good measurements on all experiments.
+        csv_output = Filename to write csv-based results into.
         """
 
         try:
@@ -701,16 +713,25 @@ class test_harness(object):
         # TODO: Before running all experiments, validate them to fail early on
         # a bad experiment list.
 
+        if csv_output:
+          csv_output_file = open(csv_output, 'w')
+        else:
+          csv_output_file = None
+
         # Iterate over all experiments.
         for i, experiment in enumerate(experiments):
             workers, allowed_error = experiment
             self.run_single_experiment(i, workers, seq_read_mb,
-                                       kill_slower, timeout, allowed_error)
+                                       kill_slower, timeout, allowed_error,
+                                       csv_output_file)
 
         # Presenting results.
         logging.info('-----ran %d experiments, %d passed, %d failed',
                 self.tried_experiments,  self.passed_experiments,
                 self.tried_experiments - self.passed_experiments)
+
+        if csv_output_file:
+          close(csv_output_file)
 
         # Cleanup.
         utils.system('rm -rf %s' % self.workdir)
