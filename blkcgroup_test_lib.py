@@ -233,6 +233,8 @@ def measure_containers(tree, device, timevals):
 
 def release_containers(exper):
     for container in exper:
+        release_containers(container['nest'])
+
         container['cpu_cgroup'].release()
         container['blkio_cgroup'].release()
 
@@ -731,7 +733,7 @@ class test_harness(object):
                 self.tried_experiments - self.passed_experiments)
 
         if csv_output_file:
-          close(csv_output_file)
+          csv_output_file.close()
 
         # Cleanup.
         utils.system('rm -rf %s' % self.workdir)
