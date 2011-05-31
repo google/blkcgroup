@@ -1,0 +1,87 @@
+#!/usr/bin/python
+
+import os
+import sys
+import time
+import errno
+import random
+import signal
+import subprocess
+
+from container import Container
+
+def test_no_process_in_non_leaf(root, parent):
+    """
+       Check that a task cannot be added to a non-leaf cgroup with the
+       exception of root.
+    """
+    pid = os.getpid()
+    print 'Creating io/g1/g11'
+    g11 = Container('g1/g11', True)
+    g11.create()
+    g11.set_mems(root.get_mems())
+    g11.set_cpus([])
+    try:
+      print 'Trying to add self to g1/tasks. This should fail.'
+      caught_exception = False
+      try:
+        parent.swallow_pid(pid)
+      except IOError, e:
+        caught_exception = True
+        print 'Caught exception: ', e
+      root.swallow_pid(pid)
+    except:
+      print 'Test FAILED. Failed to add task to root.'
+
+    g11.delete()
+
+    if caught_exception:
+      print 'Test PASSED. Task could not be added to non-leaf cgroup'
+    else:
+      print 'Test FAILED. Task was added to non-leaf cgroup.'
+
+def test_no_subgroup_in_leaf(root, parent):
+  """
+     Check that a subgroup cannot be added to a group when a task is present,
+     with the exception of root.
+  """
+  pid = os.getpid()
+  print 'Adding self to g1'
+  parent.swallow_pid(pid)
+  caught_exception = False
+  try:
+    print 'Trying to create g1/g11. This should fail.'
+    g11 = Container('g1/g11', True)
+    g11.create()
+    # Will not cross here under normal circumstances.
+    g11.delete()
+  except OSError, e:
+    caught_exception = True
+    print 'Caught exception: ', e
+
+  root.swallow_pid(pid)
+
+  if caught_exception:
+    print 'Test PASSED. Subgroup could not be created in a group with tasks.'
+  else:
+    print 'Test FAILED. Subgroup got created in a group with tasks.'
+
+def main(args):
+  root = Container('', True)
+  rootmems = root.get_mems()
+  try:
+    print 'Creating io/g1'
+    g1 = Container('g1', True)
+    g1.create()
+    g1.set_mems(rootmems)
+    g1.set_cpus([])
+
+    test_no_process_in_non_leaf(root, g1)
+    print ''
+    test_no_subgroup_in_leaf(root, g1)
+
+  finally:
+    g1.delete()
+
+if __name__ == '__main__':
+  main(sys.argv)
