@@ -484,6 +484,16 @@ class test_harness(object):
             cmd = ('/bin/dd if=/dev/zero of=%s bs=64K count=%d %s' %
                    (file_name, count, extra_options))
 
+        elif worker.startswith('io_load_read'):
+            io_load_path = os.path.join(self.srcdir, 'io_load')
+            file_name = self.some_zeroed_input_file('rddata', mbytes)
+            cmd = '%s r %s' % (io_load_path, file_name)
+
+        elif worker.startswith('io_load_write'):
+            io_load_path = os.path.join(self.srcdir, 'io_load')
+            file_name = self.some_output_file()
+            cmd = '%s w %s' % (io_load_path, file_name)
+
         # Sleep op.
         elif worker == '' or worker == 'sleep':
             cmd = ''

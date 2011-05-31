@@ -87,12 +87,14 @@ weights and what is observed.
 It's generally a good idea to work off of examples in the existing tests.
 
 The current supported workers are:
-	rdseq:      read sequential
-	rdseq.dir:  read sequential (direct)
-	rdrand:     read random
-	wrseq:      write sequential (buffered)
-	wrseq.sync: write synchronous (buffered)
-	wrseq.dir:  write sequential (direct)
+	rdseq:         read sequential
+	rdseq.dir:     read sequential (direct)
+	rdrand:        read random
+	wrseq:         write sequential (buffered)
+	wrseq.sync:    write synchronous (buffered)
+	wrseq.dir:     write sequential (direct)
+	io_load_read:  small reads, bouncing threads
+	io_load_write: small writes, bouncing threads
 
 A full description of the experiment grammar is in
 blkcgroup_test_lib.py.
