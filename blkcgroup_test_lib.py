@@ -50,9 +50,10 @@ BLKIO_CGROUP_NAME = 'io'
 
 def usage(argv):
     """Prints usage information to stderr."""
-    sys.stderr.write('%s [-cgh]: Runs a blkcgroup isolation test\n'
+    sys.stderr.write('%s [-cgh] [-o file]: Runs a blkcgroup isolation test\n'
                      '-c: Cleans test data before running\n'
                      '-g: Adds Google-specific support code\n'
+                     '-o file: Creates autotest output file\n'
                      '-h: Prints help information\n' % argv[0])
 
 
@@ -248,8 +249,10 @@ def score_max_error(tree, timevals):
     """Find maximum DTF error across containers of tree, and achieved DTFs
     """
     total_time = 0
+    total_dtf = 0
     for container in tree:
         total_time += timevals[container['name']]
+        total_dtf += container['dtf']
     actual_weights_str = ''
     maxerr = 0
 
@@ -257,7 +260,7 @@ def score_max_error(tree, timevals):
         # Calculate error.
         logging.debug('Calculate the max error for the experiment.')
         time = timevals[container['name']]
-        actual_weight = time * MAX_VALID_WEIGHT / (total_time or 1)
+        actual_weight = time * total_dtf / (total_time or 1)
         actual_weights_str += '%d' % actual_weight
         error = abs(actual_weight - int(container['dtf']))
         maxerr = max(maxerr, error)
@@ -273,7 +276,7 @@ def score_max_error(tree, timevals):
 
 
 def score_experiment(exper_num, experiment, exper, timevals, allowed_err,
-                     csv_output_file):
+                     autotest_output_file):
     maxerr_weight, actual_weights  = score_max_error(exper, timevals)
     logging.info('experiment %d achieved DTFs: %s', exper_num, actual_weights)
 
@@ -289,9 +292,9 @@ def score_experiment(exper_num, experiment, exper, timevals, allowed_err,
                  'allowed is %d',
                  exper_num, status, maxerr_weight, allowed_err)
 
-    if csv_output_file:
-        csv_output_file.write('%d; %s; %d; %d\n' %
-                              (exper_num, experiment, maxerr_weight,
+    if autotest_output_file:
+        autotest_output_file.write('%d; %s; %s; %d; %d\n' %
+                              (exper_num, experiment, status, maxerr_weight,
                                allowed_err))
 
 
@@ -572,7 +575,7 @@ class test_harness(object):
 
     def run_single_experiment(self, exper_num, experiment, seq_read_mb,
                               kill_slower, timeout, allowed_error,
-                              csv_output_file):
+                              autotest_output_file):
         """Run a single experiment involving one round of concurrent execution
            of IO workers in competing containers.
         """
@@ -627,7 +630,7 @@ class test_harness(object):
         logging.debug('Scoring the experiment.')
         passing = score_experiment(exper_num, experiment,
                                    exper, timevals, allowed_error,
-                                   csv_output_file)
+                                   autotest_output_file)
         if passing:
             self.passed_experiments += 1
         self.tried_experiments += 1
@@ -637,8 +640,7 @@ class test_harness(object):
 
 
     def run_experiments(self, experiments, seq_read_mb, workvol,
-                        kill_slower=False, timeout='',
-                        csv_output=None):
+                        kill_slower=False, timeout=''):
         """Execute a previously-generated list of experiments.
 
         experiments: a list of (string, number) tuples to run as tests.
@@ -655,11 +657,10 @@ class test_harness(object):
             Keeps 25_25_25_25% experiment from taking 4x longer than 95_5%.
             This should be set longer than most experiments, and long enough
             to reach steady state and good measurements on all experiments.
-        csv_output = Filename to write csv-based results into.
         """
 
         try:
-            opts, args = getopt.getopt(sys.argv[1:], 'cgh', ['help'])
+            opts, args = getopt.getopt(sys.argv[1:], 'cgho:', ['help'])
         except getopt.GetoptError, err:
             print str(err)
             usage(sys.argv)
@@ -667,11 +668,15 @@ class test_harness(object):
 
         cleanup = False
         google_hacks = False
+        autotest_output = False
+
         for o, a in opts:
             if o == '-c':
                 cleanup = True
             elif o == '-g':
                 google_hacks = True
+            elif o == '-o':
+                autotest_output = a
             elif o in ('-h', '--help'):
                 usage(sys.argv)
                 sys.exit()
@@ -715,25 +720,25 @@ class test_harness(object):
         # TODO: Before running all experiments, validate them to fail early on
         # a bad experiment list.
 
-        if csv_output:
-          csv_output_file = open(csv_output, 'w')
+        if autotest_output:
+          autotest_output_file = open(autotest_output, 'w')
         else:
-          csv_output_file = None
+          autotest_output_file = None
 
         # Iterate over all experiments.
         for i, experiment in enumerate(experiments):
             workers, allowed_error = experiment
             self.run_single_experiment(i, workers, seq_read_mb,
                                        kill_slower, timeout, allowed_error,
-                                       csv_output_file)
+                                       autotest_output_file)
 
         # Presenting results.
         logging.info('-----ran %d experiments, %d passed, %d failed',
                 self.tried_experiments,  self.passed_experiments,
                 self.tried_experiments - self.passed_experiments)
 
-        if csv_output_file:
-          csv_output_file.close()
+        if autotest_output_file:
+          autotest_output_file.close()
 
         # Cleanup.
         utils.system('rm -rf %s' % self.workdir)

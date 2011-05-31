@@ -112,7 +112,5 @@ seq_read_mb: Size in megabytes, of input files used for rdseq workers.
 TODO
 ====
 We plan on adding new features to this test soon, including
-  - support for split hierarchies
   - more worker types
   - more tests
-  - better control over blkio settings, like group_isolation.

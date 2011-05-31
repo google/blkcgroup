@@ -27,6 +27,9 @@ import blkcgroup_test_lib
 
 EXPERIMENTS = [
     ('600 (500 rdrand, 500 rdrand), 400 rdrand', 35),
+    ('900 (900 rdrand, 100 rdrand), 100 (900 rdrand, 100 rdrand)', 35),
+
+    ('500 rdrand, 100 (100 rdrand, 100 rdrand, 100 rdrand)', 35),
 ]
 
 test = blkcgroup_test_lib.test_harness('Single mixed cgroup test')
@@ -40,5 +43,4 @@ test.run_experiments(experiments=EXPERIMENTS,
                      seq_read_mb=seq_read_mb,
                      workvol=os.getcwd(),
                      kill_slower=True,
-                     timeout=timeout,
-                     csv_output='results.csv')
+                     timeout=timeout)
