@@ -93,7 +93,6 @@ def expect_delim(text, delim):
         raise ValueError, 'missing %s at %s' % (delim, text)
     return text[1:]
 
-
 def parse_integer(text):
     """Split a string, parsing off the integer at the beginning.
 
@@ -102,6 +101,21 @@ def parse_integer(text):
     value = re.match('\d*', text).group()
     return int(value), text[len(value):]
 
+def parse_container_weight_prio(text):
+    """Split a string, parsing off the integer at the beginning along
+    with an optional P/p flag to indicate that the group should be
+    high priority.
+
+    For example, '90% rdseq, 10% seq' becomes (90, 2, '% rdseq, 10% seq')
+                 '90p% rdseq, 10% seq' becomes (90, 1, '% rdseq, 10% seq')
+    """
+    weight, text = parse_integer(text)
+    if text.startswith('P') or text.startswith('p'):
+        priority = 1
+        text = text[1:]
+    else:
+        priority = 2
+    return weight, priority, text
 
 def parse_name(text):
     """Split an arbitrary (maybe empty) word from the beginning of a string."""
@@ -116,9 +130,9 @@ def parse_containers(text):
     containers = []
     while True:
         container = {}
-        container['dtf'], text = parse_integer(text.lstrip())
+        container['dtf'], container['priority'], text = parse_container_weight_prio(text.lstrip())
         options, text = parse_name(text)
-        # This is where we would hook in options for limiting and priority.
+        # This is where we would hook in options for limiting.
 
         worker, text = parse_name(text.lstrip())
         repeat = 0
@@ -182,7 +196,8 @@ def setup_container(container, cname, device,
 
     blk_path = cpuset.create_container_blkio(
                    device, cname, 'io',
-                   root=my_io_parent.name, blkio_shares=blkio_shares)
+                   root=my_io_parent.name, blkio_shares=blkio_shares,
+                   priority=container['priority'])
     logging.info( "path: " + path + " blk_path: " + blk_path)
 
     # Setup a view.

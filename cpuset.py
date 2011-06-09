@@ -286,7 +286,7 @@ def get_tasks(container_name):
     return tasks
 
 
-def set_blkio_controls(container_name, device, blkio_shares):
+def set_blkio_controls(container_name, device, blkio_shares, priority):
     """Define all the blkio parameters.
 
     Set the blkio controls for one container, for selected disks
@@ -307,7 +307,7 @@ def set_blkio_controls(container_name, device, blkio_shares):
 
     # Gather the "major:minor dtf" values.
     weight = blkio_shares
-    disk_info = '%s 2 0 %s' % (device, weight / 10)
+    disk_info = '%s %d 0 %s' % (device, priority, weight / 10)
 
     # Add entry to the cgroup.
     utils.write_one_line(weight_device, disk_info)
@@ -416,7 +416,7 @@ def create_container_cpuset(name, tree, mbytes, cpus=None, root=SUPER_ROOT):
 
 
 def create_container_blkio(device, name, tree,
-                           root=SUPER_ROOT, blkio_shares=None):
+                           root=SUPER_ROOT, blkio_shares=None, priority=None):
     """Create a cpuset container and move job's current pid into it.
     Allocate the list "cpus" of cpus to that container
 
@@ -433,6 +433,9 @@ def create_container_blkio(device, name, tree,
     if not blkio_shares:
         raise error.ValueError('blkio_shares not defined.')
 
+    if not priority:
+        raise error.ValueError('priority not defined.')
+
     croot = os.path.join(tree, root)
 
     cname = os.path.join(croot, name)  # path relative to super_root
@@ -444,7 +447,7 @@ def create_container_blkio(device, name, tree,
     os.mkdir(full_path(cname))
 
     # Initialize blkio container.
-    set_blkio_controls(cname, device, blkio_shares)
+    set_blkio_controls(cname, device, blkio_shares, priority)
 
     return os.path.join(root, name)
 
