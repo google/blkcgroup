@@ -247,6 +247,34 @@ def measure_containers(tree, device, timevals):
         measure_containers(container['nest'], device, timevals)
 
 
+def measure_timeslice_used(tree, device, timevals):
+    """Measures the actual timeslice that was charged to the group. This
+       is done because we dont charge the first seek to the group and so
+       the service_time and actual charged time can diverge outside the
+       allowed margin of error for some pathological workloads, masking
+       any fair scheduling errors.
+
+    """
+    for container in tree:
+        found_data = False
+        for line in container['blkio_cgroup'].get_attr('timeslice_used'):
+            parts = line.split()
+            if parts[0] == device:
+                timevals[container['name']] = int(parts[-1])
+                found_data = True
+        if not found_data:
+            timevals[container['name']] = 0
+            logging.warn('No data for container %s.' % container['name'])
+
+        for line in container['blkio_cgroup'].get_attr('unaccounted_time'):
+            parts = line.split()
+            if parts[0] == device:
+                timevals[container['name']] -= int(parts[-1])
+
+        # Recurse to nested containers.
+        measure_timeslice_used(container['nest'], device, timevals)
+
+
 def release_containers(exper):
     for container in exper:
         release_containers(container['nest'])
@@ -656,6 +684,20 @@ class test_harness(object):
         passing = score_experiment(exper_num, experiment,
                                    exper, timevals, allowed_error,
                                    autotest_output_file)
+
+        if not passing:
+            # Since we dont charge the first seek to the group, there are some
+            # workloads like rdrand-wrseq.dir that can get skewed quite badly
+            # in terms of service time, so re-score based on timeslice used to
+            # give such cases a second evaluation. This however is information
+            # for human consumption, it does not reassign the pass fail value.
+            logging.warn('Service times not proportional. Re-scoring based on'
+                         ' timeslice_used.')
+            timeslices = {}
+            measure_timeslice_used(exper, self.device, timeslices)
+            score_experiment(exper_num, experiment, exper, timeslices,
+                             allowed_error, None)
+
         if passing:
             self.passed_experiments += 1
         self.tried_experiments += 1
