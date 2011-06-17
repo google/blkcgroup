@@ -109,7 +109,28 @@ EXPERIMENTS = [
     ('500 (100p rdrand, 900 wrseq.buf*2), 100 (100 rdrand, 900 wrseq.buf*2)', 150),
     ('500 (500p rdrand, 500 wrseq.dir), 100 (500 rdrand, 500 wrseq.dir)', 150),
     ('500 (900p rdrand, 100 wrseq.dir), 100 (900 rdrand, 100 wrseq.dir)', 150),
-    ('500 (100p rdrand, 900 wrseq.dir), 100 (100 rdrand, 900 wrseq.dir)', 150)
+    ('500 (100p rdrand, 900 wrseq.dir), 100 (100 rdrand, 900 wrseq.dir)', 150),
+
+    # Run the io_load worker with prio in read & write mode.
+    ('500 (500 rdrand, 500 rdseq), 100 (500 rdrand, 500 rdseq), 100p io_load_read*2', 35),
+    ('500 (900 rdrand, 100 rdseq), 100 (900 rdrand, 100 rdseq), 100p io_load_read*2', 35),
+    ('500 (100 rdrand, 900 rdseq), 100 (100 rdrand, 900 rdseq), 100p io_load_read*2', 35),
+    ('500 (500 rdrand, 500 wrseq.buf*2), 100 (500 rdrand, 500 wrseq.buf*2), 100p io_load_read*2', 150),
+    ('500 (900 rdrand, 100 wrseq.buf*2), 100 (900 rdrand, 100 wrseq.buf*2), 100p io_load_read*2', 150),
+    ('500 (100 rdrand, 900 wrseq.buf*2), 100 (100 rdrand, 900 wrseq.buf*2), 100p io_load_read*2', 150),
+    ('500 (500 rdrand, 500 wrseq.dir), 100 (500 rdrand, 500 wrseq.dir), 100p io_load_read*2', 35),
+    ('500 (900 rdrand, 100 wrseq.dir), 100 (900 rdrand, 100 wrseq.dir), 100p io_load_read*2', 35),
+    ('500 (100 rdrand, 900 wrseq.dir), 100 (100 rdrand, 900 wrseq.dir), 100p io_load_read*2', 35),
+
+    ('500 (500 rdrand, 500 rdseq), 100 (500 rdrand, 500 rdseq), 100p io_load_write*2', 35),
+    ('500 (900 rdrand, 100 rdseq), 100 (900 rdrand, 100 rdseq), 100p io_load_write*2', 35),
+    ('500 (100 rdrand, 900 rdseq), 100 (100 rdrand, 900 rdseq), 100p io_load_write*2', 35),
+    ('500 (500 rdrand, 500 wrseq.buf*2), 100 (500 rdrand, 500 wrseq.buf*2), 100p io_load_write*2', 150),
+    ('500 (900 rdrand, 100 wrseq.buf*2), 100 (900 rdrand, 100 wrseq.buf*2), 100p io_load_write*2', 150),
+    ('500 (100 rdrand, 900 wrseq.buf*2), 100 (100 rdrand, 900 wrseq.buf*2), 100p io_load_write*2', 150),
+    ('500 (500 rdrand, 500 wrseq.dir), 100 (500 rdrand, 500 wrseq.dir), 100p io_load_write*2', 35),
+    ('500 (900 rdrand, 100 wrseq.dir), 100 (900 rdrand, 100 wrseq.dir), 100p io_load_write*2', 35),
+    ('500 (100 rdrand, 900 wrseq.dir), 100 (100 rdrand, 900 wrseq.dir), 100p io_load_write*2', 35)
 ]
 
 test = blkcgroup_test_lib.test_harness('Single mixed cgroup test')
