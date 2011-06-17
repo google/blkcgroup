@@ -535,6 +535,8 @@ class test_harness(object):
         elif worker.startswith('io_load_write'):
             io_load_path = os.path.join(self.srcdir, 'io_load')
             file_name = self.some_output_file()
+            # Touch the file so it exists.
+            open(file_name, 'w').close()
             cmd = '%s w %s' % (io_load_path, file_name)
 
         # Sleep op.
