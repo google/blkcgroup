@@ -319,7 +319,7 @@ def score_max_error(tree, timevals):
 
 
 def score_experiment(exper_num, experiment, exper, timevals, allowed_err,
-                     autotest_output_file):
+                     autotest_data):
     maxerr_weight, actual_weights  = score_max_error(exper, timevals)
     logging.info('experiment %d achieved DTFs: %s', exper_num, actual_weights)
 
@@ -335,12 +335,9 @@ def score_experiment(exper_num, experiment, exper, timevals, allowed_err,
                  'allowed is %d',
                  exper_num, status, maxerr_weight, allowed_err)
 
-    if autotest_output_file:
-        autotest_output_file.write('%d; %s; %s; %d; %d\n' %
-                              (exper_num, experiment, status, maxerr_weight,
-                               allowed_err))
-
-
+    autotest_data.append(('%d; %s; %s; %d; %d' %
+                         (exper_num, experiment, status, maxerr_weight,
+                          allowed_err)))
     return passing
 
 
@@ -368,7 +365,8 @@ def run_worker(cmd, cpu_cgroup, blkio_cgroup, pids_file):
     blkio_cgroup.move_my_task_here()
     p = subprocess.Popen(cmd.split(),
                          stdout=subprocess.PIPE,
-                         stderr=subprocess.STDOUT)
+                         stderr=subprocess.STDOUT,
+                         close_fds=True)
     if pids_file:
         utils.system('echo %d >> %s' % (p.pid, pids_file))
     logging.debug('running "%s" in container %s and io cgroup %s as pid %d',
@@ -630,7 +628,7 @@ class test_harness(object):
 
     def run_single_experiment(self, exper_num, experiment, seq_read_mb,
                               kill_slower, timeout, allowed_error,
-                              autotest_output_file):
+                              autotest_data):
         """Run a single experiment involving one round of concurrent execution
            of IO workers in competing containers.
         """
@@ -685,7 +683,7 @@ class test_harness(object):
         logging.debug('Scoring the experiment.')
         passing = score_experiment(exper_num, experiment,
                                    exper, timevals, allowed_error,
-                                   autotest_output_file)
+                                   autotest_data)
 
         if not passing:
             # Since we dont charge the first seek to the group, there are some
@@ -789,25 +787,32 @@ class test_harness(object):
         # TODO: Before running all experiments, validate them to fail early on
         # a bad experiment list.
 
-        if autotest_output:
-          autotest_output_file = open(autotest_output, 'w')
-        else:
-          autotest_output_file = None
+        autotest_data = []
 
         # Iterate over all experiments.
         for i, experiment in enumerate(experiments):
             workers, allowed_error = experiment
             self.run_single_experiment(i, workers, seq_read_mb,
                                        kill_slower, timeout, allowed_error,
-                                       autotest_output_file)
+                                       autotest_data)
+
+        # We have to do file output after all the worker threads are done and we
+        # won't create any more. Printing during score_experiment() caused
+        # issues with child processes flushing data and test files having
+        # duplicate entries.
+        if autotest_output:
+          autotest_output_file = open(autotest_output, 'w')
+          for item in autotest_data:
+            autotest_output_file.write('%s\n' % item)
+
+          autotest_output_file.close()
+
 
         # Presenting results.
         logging.info('-----ran %d experiments, %d passed, %d failed',
                 self.tried_experiments,  self.passed_experiments,
                 self.tried_experiments - self.passed_experiments)
 
-        if autotest_output_file:
-          autotest_output_file.close()
 
         # Cleanup.
         utils.system('rm -rf %s' % self.workdir)
