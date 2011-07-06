@@ -103,7 +103,7 @@ def read_one_line(filename):
 def write_one_line(filename, line):
     """Open a file and write one line, adding a newline at the end."""
     line = line.rstrip('\n') + '\n'
-    logging.info('Writing in file:%s, line:%s' % (filename, line))
+    logging.debug('Writing in file:%s, line:%s' % (filename, line))
     f = open(filename, 'w')
     try:
         f.write(line)
