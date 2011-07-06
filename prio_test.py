@@ -26,31 +26,42 @@ import logging
 import os
 import blkcgroup_test_lib
 
-def dump_wait_histo(tree, device):
+def dump_wait_histo(container, worker, device):
+    for line in container['blkio_cgroup'].get_attr('io_wait_time_histo'):
+        parts = line.split()
+        # Line format is
+        # device direction <10ms 10-20 20-50 50-100 100-200 200-500...
+        if parts[0] == device:
+            int_parts = map(int, parts[2:])
+            total = reduce(lambda x, y: x+y, int_parts)
+            if total == 0:
+                continue
+            over_50 = total - int_parts[0] - int_parts[1] - int_parts[2]
+            over_100 = over_50 - int_parts[3]
+
+            mode = parts[1]
+            logging.info('container %s %s %s wait: %f%% > 50ms, %f%% > 100ms' %
+                         (container['name'], worker, mode,
+                          over_50 * 100.0 / total, over_100 * 100.0 / total))
+
+
+def dump_preempt_stats(container, worker, device):
+    for line in container['blkio_cgroup'].get_attr('preempt_count_self'):
+        parts = line.split()
+        if parts[0] == device:
+            logging.info('container %s %s: preempt %s' %
+                         (container['name'], worker, line))
+
+def dump_exp_stats(tree, device):
     """Log the percentage of requests that waited 50ms, and 100ms"""
     for container in tree:
-        for line in container['blkio_cgroup'].get_attr('io_wait_time_histo'):
-          parts = line.split()
-          # Line format is
-          # device direction <10ms 10-20 20-50 50-100 100-200 200-500...
-          if parts[0] == device:
-              int_parts = map(int, parts[2:])
-              total = reduce(lambda x, y: x+y, int_parts)
-              if total == 0:
-                  continue
-              over_50 = total - int_parts[0] - int_parts[1] - int_parts[2]
-              over_100 = over_50 - int_parts[3]
+        worker = ''
+        if container['worker']:
+            worker = '(%s)' % container['worker']
+        dump_wait_histo(container, worker, device)
+        dump_preempt_stats(container, worker, device)
 
-              mode = parts[1]
-              worker = ''
-              if container['worker']:
-                  worker = '(%s)' % container['worker']
-              logging.info(
-                  'container %s %s %s wait: %f%% > 50ms, %f%% > 100ms' %
-                  (container['name'], worker, mode,
-                   over_50 * 100.0 / total, over_100 * 100.0 / total))
-
-        dump_wait_histo(container['nest'], device)
+        dump_exp_stats(container['nest'], device)
 
 
 
@@ -62,7 +73,7 @@ EXPERIMENTS = [
 ]
 
 test = blkcgroup_test_lib.test_harness('Priority testing',
-                                       post_experiment_cb=dump_wait_histo)
+                                       post_experiment_cb=dump_exp_stats)
 blkcgroup_test_lib.setup_logging(debug=False)
 
 seq_read_mb = 1500
