@@ -335,9 +335,10 @@ def score_experiment(exper_num, experiment, exper, timevals, allowed_err,
                  'allowed is %d',
                  exper_num, status, maxerr_weight, allowed_err)
 
-    autotest_data.append(('%d; %s; %s; %d; %d' %
-                         (exper_num, experiment, status, maxerr_weight,
-                          allowed_err)))
+    if autotest_data is not None:
+        autotest_data.append(('%d; %s; %s; %d; %d' %
+                             (exper_num, experiment, status, maxerr_weight,
+                              allowed_err)))
     return passing
 
 
