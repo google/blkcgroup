@@ -432,8 +432,9 @@ def enable_blkio_and_cfq(device):
 
 
 class test_harness(object):
-    def __init__(self, title):
+    def __init__(self, title, post_experiment_cb=None):
         self.title = title
+        self._post_experiment_cb = post_experiment_cb
 
 
     def some_zeroed_input_file(self, prefix, mbytes):
@@ -678,6 +679,8 @@ class test_harness(object):
 
         timevals = {}
         measure_containers(exper, self.device, timevals)
+        if self._post_experiment_cb:
+            self._post_experiment_cb(exper, self.device)
 
         # Score the experiment.
         logging.debug('Scoring the experiment.')
