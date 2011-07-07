@@ -45,12 +45,22 @@ def dump_wait_histo(container, worker, device):
                           over_50 * 100.0 / total, over_100 * 100.0 / total))
 
 
-def dump_preempt_stats(container, worker, device):
+def dump_preempt_count_stats(container, worker, device):
     for line in container['blkio_cgroup'].get_attr('preempt_count_self'):
         parts = line.split()
         if parts[0] == device:
-            logging.info('container %s %s: preempt %s' %
+            logging.info('container %s %s: preempt count %s' %
                          (container['name'], worker, line))
+
+
+def dump_preempt_throttle_stats(container, worker, device):
+    for line in container['blkio_cgroup'].get_attr('preempt_throttle_self'):
+        parts = line.split()
+        if parts[0] == device:
+            logging.info('container %s %s: preempt throttle %s' %
+                         (container['name'], worker, line))
+
+
 
 def dump_exp_stats(tree, device):
     """Log the percentage of requests that waited 50ms, and 100ms"""
@@ -59,7 +69,8 @@ def dump_exp_stats(tree, device):
         if container['worker']:
             worker = '(%s)' % container['worker']
         dump_wait_histo(container, worker, device)
-        dump_preempt_stats(container, worker, device)
+        dump_preempt_count_stats(container, worker, device)
+        dump_preempt_throttle_stats(container, worker, device)
 
         dump_exp_stats(container['nest'], device)
 
@@ -67,9 +78,7 @@ def dump_exp_stats(tree, device):
 
 EXPERIMENTS = [
     # Basic proportion testing.
-    ('100p io_load_read, 500 rdrand*4', 35)
-
-
+    ('450p io_load_read, 50 rdrand.delay2', 35)
 ]
 
 test = blkcgroup_test_lib.test_harness('Priority testing',
@@ -77,7 +86,7 @@ test = blkcgroup_test_lib.test_harness('Priority testing',
 blkcgroup_test_lib.setup_logging(debug=False)
 
 seq_read_mb = 1500
-timeout = '%ds' % (seq_read_mb // 25)
+timeout = '60s'
 
 
 test.run_experiments(experiments=EXPERIMENTS,
