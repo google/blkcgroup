@@ -39,6 +39,7 @@ struct io_params {
 	int num_threads;
 	pthread_cond_t io_cond;
 	pthread_mutex_t io_mutex;
+	int delay_ms;
 };
 
 /* Starting condition variable. */
@@ -94,6 +95,8 @@ void *do_io(void *arg)
 				pthread_exit(NULL);
 			}
 			count++;
+			if (params->delay_ms != 0)
+				usleep(params->delay_ms * 1000);
 		}
 		clock_gettime(CLOCK_MONOTONIC, &t2);
 		diff_timespec(&t1, &t2, &t3);
@@ -122,17 +125,27 @@ int main(int argc, char *argv[])
 	pthread_t thr[NUM_THR];
 	void *return_value;
 
-	if (argc != 3) {
-		fprintf(stderr, "usage: %s <r|w> <file>\n", argv[0]);
+	int c;
+	params.delay_ms = 0;
+
+	while ((c = getopt(argc, argv, "d:")) != -1) {
+		if (c == 'd') {
+			params.delay_ms = atoi(optarg);
+		}
+	}
+
+	if ((argc != 3) && (argc != 5)) {
+		fprintf(stderr, "usage: %s [-d delayms] <r|w> <file>\n",
+		        argv[0]);
 		exit(1);
 	}
 
-	fd = open(argv[2], O_RDWR | O_DIRECT, S_IRUSR | S_IWUSR);
+	fd = open(argv[optind + 1], O_RDWR | O_DIRECT, S_IRUSR | S_IWUSR);
 	if (fd < 0) {
 		perror("Failure opening file.");
 		exit(1);
 	}
-	params.rw = argv[1][0];
+	params.rw = argv[optind][0];
 	params.fd = fd;
 	params.num_threads = 0;
 	pthread_cond_init(&params.io_cond, NULL);
