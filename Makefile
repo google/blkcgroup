@@ -23,7 +23,7 @@ clean:
 	rm -rf rand_read io_load
 
 rand_read: rand_read.c
-	$(CC) $(CFLAGS) -o $@ $^
+	$(CC) $(CFLAGS) -o $@ -lm $^
 
 io_load: io_load.c
 	$(CC) $(CFLAGS) -o $@ $^ -lrt -lpthread

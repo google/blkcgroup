@@ -28,8 +28,13 @@
 #include <errno.h>
 #include <string.h>
 #include <time.h>
+#include <math.h>
+#include <float.h>
+#include <signal.h>
 
 const char *program;
+
+sig_atomic_t killed;
 
 void usage()
 {
@@ -37,6 +42,10 @@ void usage()
 		"Usage: %s [ -d DELAYMS ] [ -c COUNT ] <log2(IO size)> "
 		"<filename>\n",
 		program);
+}
+
+void signal_handler(int signal) {
+	killed = 1;
 }
 
 /*
@@ -54,6 +63,8 @@ static int random_read(char *filename, off64_t count,
 	struct stat64 statBuf;
 	off64_t i, offset, ret, size;
 	struct timespec time_remaining;
+	double latency, min_lat, max_lat, mean, n_variance, prev_mean;
+	struct timeval start_time, finish_time, elapsed_time;
 
 	buffer = malloc((1 << ioSizeBits) * sizeof(char));
 	if (buffer == NULL) {
@@ -87,7 +98,11 @@ static int random_read(char *filename, off64_t count,
 	}
 	printf("Doing %zd random reads\n", count);
 
-	for (i = 0; i < count; ++i) {
+	min_lat = DBL_MAX;
+	max_lat = 0.0;
+	mean = n_variance = 0.0;
+
+	for (i = 0; i < count && !killed; ++i) {
 		offset = (((off64_t) rand()) % size) << ioSizeBits;
 
 		ret = lseek64(fd, offset, SEEK_SET);
@@ -96,11 +111,13 @@ static int random_read(char *filename, off64_t count,
 			return -1;
 		}
 
+		gettimeofday(&start_time, NULL);
 		ret = read(fd, buffer, (1 << ioSizeBits));
 		if (ret < 0) {
 			fprintf(stderr, "read failed: %s\n", strerror(errno));
 			return -1;
 		}
+		gettimeofday(&finish_time, NULL);
 
 		if (sleep_time.tv_sec != -1) {
 			time_remaining = sleep_time;
@@ -109,8 +126,35 @@ static int random_read(char *filename, off64_t count,
 				    nanosleep(&time_remaining, &time_remaining);
 			} while (ret == EINTR);
 		}
+
+		/*
+		 * compute latancy statistics, currently min, max, mean and std
+		 * dev.
+		 */
+		timersub(&finish_time, &start_time, &elapsed_time);
+		latency = elapsed_time.tv_sec + 1e-6*elapsed_time.tv_usec;
+		min_lat = fminl(min_lat, latency);
+		max_lat = fmaxl(max_lat, latency);
+
+		if (i == 0)
+			mean = latency;
+		prev_mean = mean;
+		mean += (latency - mean) / (i + 1);
+		n_variance += (latency - prev_mean) * (latency - mean);
 	}
 	close(fd);
+
+	if (killed)
+		fprintf(stderr, "Interrupted\n");
+
+	printf("min_read_latency %.2f ms\n"
+	       "max_read_latency %.2f ms\n"
+	       "mean_read_latency %.2f ms\n"
+	       "stddev_read_latency %.2f ms\n"
+	       "reads %ld count\n",
+	       min_lat*1000, max_lat*1000, mean*1000,
+	       sqrt(n_variance / i)*1000, i);
+
 	return 0;
 }
 
@@ -124,6 +168,7 @@ int main(int argc, char **argv)
 	long sleep_ns;
 	struct timespec sleep_time;
 	int opt;
+	struct sigaction sig_action;
 
 	program = argv[0];
 
@@ -171,6 +216,12 @@ int main(int argc, char **argv)
 	filename = argv[optind + 1];
 
 	srand(42);
+
+	killed = 0;
+	memset(&sig_action, 0, sizeof(sig_action));
+	sig_action.sa_handler = signal_handler;
+	sigaction(SIGINT, &sig_action, NULL);
+	sigaction(SIGTERM, &sig_action, NULL);
 
 	return random_read(filename, count, sleep_time, ioSizeBits);
 }
