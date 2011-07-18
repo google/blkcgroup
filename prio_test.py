@@ -15,12 +15,16 @@
 #   limitations under the License.
 #
 #
-# A fairly minimal test to run a test experiment with two workers:
-#   - A random read worker, with 60% dtf
-#   - A sequential writer (direct writes), with 40% dtf
+# A fairly minimal test for RT-priority work.
+# This test isn't expected to pass DTF measurements, but we do expect to get
+# useful statistics on preemption behavior. This test is used to validate kernel
+# patches to support cross-cgroup preemption behavior.
 #
-# This test also serves to show off how methods can be hooked in before and
-# after an experiment to retrieve container statistics for debugging.
+# TODO:
+#  Remove group proportion checking (but still report it)
+#  Add more test cases
+#  Establish wait time constraints (?)
+
 
 import logging
 import os
@@ -61,7 +65,6 @@ def dump_preempt_throttle_stats(container, worker, device):
                          (container['name'], worker, line))
 
 
-
 def dump_exp_stats(tree, device):
     """Log the percentage of requests that waited 50ms, and 100ms"""
     for container in tree:
@@ -78,14 +81,15 @@ def dump_exp_stats(tree, device):
 
 EXPERIMENTS = [
     # Basic proportion testing.
-    ('450p io_load_read, 50 rdrand.delay2', 35)
+    ('450p rdrand.delay400, 50 rdrand.delay2', 35)
+    ('450p rdrand.delay400, 50 rdrand.delay2*4', 35)
 ]
 
 test = blkcgroup_test_lib.test_harness('Priority testing',
                                        post_experiment_cb=dump_exp_stats)
 blkcgroup_test_lib.setup_logging(debug=False)
 
-seq_read_mb = 1500
+seq_read_mb = 4500
 timeout = '60s'
 
 
