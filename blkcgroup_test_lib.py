@@ -530,14 +530,23 @@ class test_harness(object):
         elif worker.startswith('io_load_read'):
             io_load_path = os.path.join(self.srcdir, 'io_load')
             file_name = self.some_zeroed_input_file('rddata', mbytes)
-            cmd = '%s r %s' % (io_load_path, file_name)
+            delayms = ''
+            if variant.startswith('delay'):
+                delayms = '-d %d ' % int(variant[5:])
+
+            cmd = '%s %s r %s' % (io_load_path, delayms, file_name)
 
         elif worker.startswith('io_load_write'):
             io_load_path = os.path.join(self.srcdir, 'io_load')
             file_name = self.some_output_file()
+
+            delayms = ''
+            if variant.startswith('delay'):
+                delayms = '-d %d ' % int(variant[5:])
+
             # Touch the file so it exists.
             open(file_name, 'w').close()
-            cmd = '%s w %s' % (io_load_path, file_name)
+            cmd = '%s %s w %s' % (io_load_path, delayms, file_name)
 
         # Sleep op.
         elif worker == '' or worker == 'sleep':
@@ -604,7 +613,7 @@ class test_harness(object):
         pids = []
         for task in runners:
             args = task
-            logging.info('running worker args: %s' % args)
+            logging.debug('running worker args: %s' % args)
             pid = os.fork()
             if not pid:  # we are child process
                 try:
