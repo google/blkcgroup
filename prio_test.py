@@ -72,8 +72,9 @@ def dump_exp_stats(tree, device):
         if container['worker']:
             worker = '(%s)' % container['worker']
         dump_wait_histo(container, worker, device)
-        dump_preempt_count_stats(container, worker, device)
-        dump_preempt_throttle_stats(container, worker, device)
+        if container['priority'] == 1:
+            dump_preempt_count_stats(container, worker, device)
+            dump_preempt_throttle_stats(container, worker, device)
 
         dump_exp_stats(container['nest'], device)
 
