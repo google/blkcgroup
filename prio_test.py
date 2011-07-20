@@ -21,7 +21,6 @@
 # patches to support cross-cgroup preemption behavior.
 #
 # TODO:
-#  Remove group proportion checking (but still report it)
 #  Add more test cases
 #  Establish wait time constraints (?)
 
@@ -82,8 +81,16 @@ def dump_exp_stats(tree, device):
 
 EXPERIMENTS = [
     # Basic proportion testing.
-    ('450p rdrand.delay400, 50 rdrand.delay2', 35)
-    ('450p rdrand.delay400, 50 rdrand.delay2*4', 35)
+
+    # Preemption-only test cases. We don't care about isolation here, we just
+    # want to make sure we can preempt without being throttled.
+    ('450p rdrand.delay400, 50 rdrand.delay2', 1000),
+    ('450p rdrand.delay400, 50 rdrand.delay2*4', 1000),
+
+    # Proportion testing to ensure that groups that have priority don't get more
+    # time than they should.
+    ('50p rdrand.delay2, 50 rdrand.delay2*4', 35),
+    ('50p rdrand.delay2*4, 50 rdrand.delay2*4', 35),
 ]
 
 test = blkcgroup_test_lib.test_harness('Priority testing',
