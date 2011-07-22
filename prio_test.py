@@ -97,6 +97,14 @@ EXPERIMENTS = [
     # time than they should.
     ('50p rdrand.delay2, 50 rdrand.delay2*4', 35),
     ('50p rdrand.delay2*4, 50 rdrand.delay2*4', 35),
+    ('50p rdrand, 50 rdrand.delay2*4', 35),
+    ('50p rdrand*8, 50 rdrand.delay2*4', 35),
+
+    # Use a delay longer than the idle time (8ms) to ensure that if we're
+    # idling, we still end up off the service tree.
+    ('50p rdrand.delay9, 50 rdrand.delay2*4', 35),
+    ('50p rdrand.delay9, 50 rdrand.delay9', 35),
+
 ]
 
 test = blkcgroup_test_lib.test_harness('Priority testing',
