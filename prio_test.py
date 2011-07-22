@@ -48,20 +48,24 @@ def dump_wait_histo(container, worker, device):
                           over_50 * 100.0 / total, over_100 * 100.0 / total))
 
 
-def dump_preempt_count_stats(container, worker, device):
+def get_preempt_count_stats(container, worker, device):
+    d = {}
     for line in container['blkio_cgroup'].get_attr('preempt_count_self'):
         parts = line.split()
         if parts[0] == device:
-            logging.info('container %s %s: preempt count %s' %
-                         (container['name'], worker, line))
+            k = parts[1]
+            d[k] = parts[2]
+    return d
 
 
-def dump_preempt_throttle_stats(container, worker, device):
+def get_preempt_throttle_stats(container, worker, device):
+    d = {}
     for line in container['blkio_cgroup'].get_attr('preempt_throttle_self'):
         parts = line.split()
         if parts[0] == device:
-            logging.info('container %s %s: preempt throttle %s' %
-                         (container['name'], worker, line))
+            k = parts[1]
+            d[k] = parts[2]
+    return d
 
 
 def dump_exp_stats(tree, device):
@@ -72,16 +76,18 @@ def dump_exp_stats(tree, device):
             worker = '(%s)' % container['worker']
         dump_wait_histo(container, worker, device)
         if container['priority'] == 1:
-            dump_preempt_count_stats(container, worker, device)
-            dump_preempt_throttle_stats(container, worker, device)
+            counts = get_preempt_count_stats(container, worker, device)
+            throttles = get_preempt_throttle_stats(container, worker, device)
+            for k in counts.iterkeys():
+                logging.info('container %s %s: %s preempt count %s throttle %s'
+                             % (container['name'], worker, k,
+                                counts[k], throttles[k]))
 
         dump_exp_stats(container['nest'], device)
 
 
 
 EXPERIMENTS = [
-    # Basic proportion testing.
-
     # Preemption-only test cases. We don't care about isolation here, we just
     # want to make sure we can preempt without being throttled.
     ('450p rdrand.delay400, 50 rdrand.delay2', 1000),
