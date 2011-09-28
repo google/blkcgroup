@@ -42,9 +42,6 @@ struct io_params {
 	int delay_ms;
 };
 
-/* Starting condition variable. */
-static pthread_cond_t start_condition = PTHREAD_COND_INITIALIZER;
-
 /* result = t2 - t1 */
 static void diff_timespec(struct timespec *t1, struct timespec *t2,
                           struct timespec *result)
@@ -100,11 +97,6 @@ void *do_io(void *arg)
 		}
 		clock_gettime(CLOCK_MONOTONIC, &t2);
 		diff_timespec(&t1, &t2, &t3);
-		{
-		int io_size = (ios_per_time * sizeof(buffer))/(1024 * 1024);
-		long long usec = t3.tv_sec * 1000000LL + t3.tv_nsec / 1000;
-		fprintf(stdout, "IO'd %d MiB in %ld usec\n", io_size, usec);
-		}
 		pthread_cond_signal(&params->io_cond);
 	}
 }
@@ -157,4 +149,6 @@ int main(int argc, char *argv[])
 	pthread_cond_signal(&params.io_cond);
 	pthread_join(thr[0], &return_value);
 	pthread_join(thr[1], &return_value);
+
+        return 0;
 }

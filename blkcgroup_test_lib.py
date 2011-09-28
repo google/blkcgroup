@@ -789,7 +789,7 @@ class test_harness(object):
         logging.debug('Measuring IO on disk %s', self.device)
 
         # Setup test specific parameters.
-        self.srcdir = os.path.dirname(__file__)
+        self.srcdir = os.getcwd()
         self.input_file_count = self.output_file_count = 0
         self.existing_input_files = {}
         self.tried_experiments  = 0
