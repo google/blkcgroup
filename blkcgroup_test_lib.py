@@ -101,7 +101,7 @@ def parse_integer(text):
     value = re.match('\d*', text).group()
     return int(value), text[len(value):]
 
-def parse_container_weight_prio(text):
+def parse_container(text):
     """Split a string, parsing off the integer at the beginning along
     with an optional P/p flag to indicate that the group should be
     high priority.
@@ -115,7 +115,15 @@ def parse_container_weight_prio(text):
         text = text[1:]
     else:
         priority = 2
-    return weight, priority, text
+    if text.startswith('S') or text.startswith('s'):
+        shared_sync_queues = True
+    else:
+        shared_sync_queues = False
+    return {
+        'weight': weight,
+        'priority': priority,
+        'shared_sync_queues': shared_sync_queues
+    }, text
 
 def parse_name(text):
     """Split an arbitrary (maybe empty) word from the beginning of a string."""
@@ -129,8 +137,7 @@ def parse_containers(text):
     """Parse worker containers in an experiment."""
     containers = []
     while True:
-        container = {}
-        container['dtf'], container['priority'], text = parse_container_weight_prio(text.lstrip())
+        container, text = parse_container(text.lstrip())
         options, text = parse_name(text)
         # This is where we would hook in options for limiting.
 
@@ -189,15 +196,16 @@ def setup_container(container, cname, device,
     """
     # Create a new cpus+mem cgroup, below my_cpu_parent:
     mbytes = plan_container_size(container)
-    blkio_shares = container['dtf']
+    weight = container['weight']
 
     path = cpuset.create_container_cpuset(
                    cname, 'cpuset', root=my_cpu_parent.name, mbytes=mbytes)
 
     blk_path = cpuset.create_container_blkio(
                    device, cname, 'io',
-                   root=my_io_parent.name, blkio_shares=blkio_shares,
-                   priority=container['priority'])
+                   root=my_io_parent.name, weight=weight,
+                   priority=container['priority'],
+                   shared_sync_queues=container['shared_sync_queues'])
     logging.info( "path: " + path + " blk_path: " + blk_path)
 
     # Setup a view.
@@ -292,10 +300,10 @@ def score_max_error(tree, timevals):
     """Find maximum DTF error across containers of tree, and achieved DTFs
     """
     total_time = 0
-    total_dtf = 0
+    total_weight = 0
     for container in tree:
         total_time += timevals[container['name']]
-        total_dtf += container['dtf']
+        total_weight += container['weight']
     actual_weights_str = ''
     maxerr = 0
 
@@ -303,9 +311,9 @@ def score_max_error(tree, timevals):
         # Calculate error.
         logging.debug('Calculate the max error for the experiment.')
         time = timevals[container['name']]
-        actual_weight = time * total_dtf / (total_time or 1)
+        actual_weight = time * total_weight / (total_time or 1)
         actual_weights_str += '%d' % actual_weight
-        error = abs(actual_weight - int(container['dtf']))
+        error = abs(actual_weight - int(container['weight']))
         maxerr = max(maxerr, error)
 
         error, inner_w = score_max_error(container['nest'], timevals)
@@ -599,7 +607,7 @@ class test_harness(object):
 
         if pids_file and timeout:
             # add pseudo worker to root containers to timeout all workers,
-            # shortens experiment when fastest worker was given low DTF share
+            # shortens experiment when fastest worker was given low weight
             cmd = 'sleep %s' % timeout
             container = tree[0]
             tasks.append([cmd, cgroup.root_cgroup('cpuset'),

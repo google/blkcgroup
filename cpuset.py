@@ -286,34 +286,48 @@ def get_tasks(container_name):
     return tasks
 
 
-def set_blkio_controls(container_name, device, blkio_shares, priority):
+def set_blkio_controls(container_name, device,
+                       weight, priority, shared_sync_queues):
     """Define all the blkio parameters.
 
     Set the blkio controls for one container, for selected disks
     writing directly to /dev/cgroup/container_name/blkio.weight_device
 
     Args:
-        container_name: the name of the container where to update the values.
-        device: the name of the device to set the blkio parameters on.
-        blkio_shares = user specified share (100-1000) for the blkio subsystem.
+        container_name = the name of the container where to update the values.
+        device = the name of the device to set the blkio parameters on.
+        weight = user specified weight (100-1000) for the blkio subsystem.
+        priority = 0-2, the I/O priority (0 is best effort, 1 is prio, 2 is
+          idle)
+        shared_sync_queues = if true, uses per-cgroup sync queues, otherwise
+          uses per-task sync queues.
     """
     # Setup path to blkio cgroup.
-    # weight_device = blkio_attr(container_name, 'weight_device')
     weight_device = blkio_attr(container_name, 'io_service_level')
     logging.info('weight device: ' + weight_device)
     if not os.path.exists(weight_device):
         raise error.Error("Kernel predates blkio features or blkio "
                           "cgroup is mounted separately from cpusets")
 
-    # Gather the "major:minor dtf" values.
-    weight = blkio_shares
+    # Set the service level for the device.
     disk_info = '%s %d 0 %s' % (device, priority, weight / 10)
-
-    # Add entry to the cgroup.
     utils.write_one_line(weight_device, disk_info)
-
-    logging.debug('set_blkio_controls of %s to %s',
+    
+    logging.debug('set io_service_level of %s to %s',
                   container_name, disk_info)
+
+    shared_sync_queues_device = blkio_attr(container_name, 'shared_sync_queues')
+    if not os.path.exists(shared_sync_queues_device):
+        # This is not fatal, just ignore the value of the flag
+        logging.warn("Kernel predates shared sync queues")
+        return
+
+    logging.info('shared sync queues device: ' + shared_sync_queues_device)
+    shared_sync_queues_str = "%d" % shared_sync_queues
+    utils.write_one_line(shared_sync_queues_device, "%d" % shared_sync_queues)
+    
+    logging.debug('set shared_sync_queues of %s to %s',
+                  container_name, shared_sync_queues_str)
 
 
 def create_container_with_specific_mems_cpus(name, mems, cpus):
@@ -416,7 +430,10 @@ def create_container_cpuset(name, tree, mbytes, cpus=None, root=SUPER_ROOT):
 
 
 def create_container_blkio(device, name, tree,
-                           root=SUPER_ROOT, blkio_shares=None, priority=None):
+                           root=SUPER_ROOT,
+                           weight=None,
+                           priority=None,
+                           shared_sync_queues=None):
     """Create a cpuset container and move job's current pid into it.
     Allocate the list "cpus" of cpus to that container
 
@@ -426,15 +443,22 @@ def create_container_blkio(device, name, tree,
         tree = cgroup tree
         root = the parent cpuset to nest this new set within
             '': unnested top-level container
-        blkio_shares = user specified share for the blkio subsystem
+        weight = user specified weight for the blkio subsystem
+        priority = 0-2, the I/O priority (0 is best effort, 1 is prio, 2 is
+          idle)
+        shared_sync_queues = if true, uses per-cgroup sync queues, otherwise
+          uses per-task sync queues.
     Return:
         name: the name of the container.
     """
-    if not blkio_shares:
-        raise error.ValueError('blkio_shares not defined.')
+    if weight is None:
+        raise ValueError('weight not defined.')
 
-    if not priority:
-        raise error.ValueError('priority not defined.')
+    if priority is None:
+        raise ValueError('priority not defined.')
+
+    if shared_sync_queues is None:
+        raise ValueError('shared_sync_queues not defined.')
 
     croot = os.path.join(tree, root)
 
@@ -447,7 +471,8 @@ def create_container_blkio(device, name, tree,
     os.mkdir(full_path(cname))
 
     # Initialize blkio container.
-    set_blkio_controls(cname, device, blkio_shares, priority)
+    set_blkio_controls(cname, device,
+                       weight, priority, shared_sync_queues)
 
     return os.path.join(root, name)
 
