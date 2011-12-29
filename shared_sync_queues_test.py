@@ -27,8 +27,8 @@ EXPERIMENTS = [
   ('140S rdrand*8, 140 rdrand*8, 140S rdrand*8, 140 rdrand*8, 140S rdrand*8, 140 rdrand*8, 160S rdrand*8', 35),
   ('140S wrseq.buf*8, 140 wrseq.buf*8, 140S wrseq.buf*8, 140S wrseq.buf*8, 140 wrseq.buf*8, 140S wrseq.buf*8, 160 wrseq.buf*8', 150),
   ('140S wrseq.dir*8, 140 wrseq.dir*8, 140S wrseq.dir*8, 140 wrseq.dir*8, 140S wrseq.dir*8, 140 wrseq.dir*8, 160S wrseq.dir*8', 35),
-  ('500S rdrand*8, 500 wrseq.buf*8', 150),
-  ('500 rdrand*8, 500S wrseq.dir*8', 35),
+  ('900S rdrand*8, 100 wrseq.buf*8', 150),
+  ('900 rdrand*8, 100S wrseq.dir*8', 35),
 ]
 
 test = blkcgroup_test_lib.test_harness('Shared sync queues test')
