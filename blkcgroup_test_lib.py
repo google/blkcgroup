@@ -30,7 +30,7 @@
 #      Do more testing on non fakenuma systems
 
 
-import getopt, glob, logging, os, re, subprocess, sys, time, traceback
+import getopt, glob, logging, os, re, subprocess, sys, time, traceback, math
 import cgroup, cpuset, error, utils
 
 # Size of allocated containers for workers. We chose 360mb because it's small
@@ -281,6 +281,18 @@ def measure_timeslice_used(tree, device, timevals):
 
         # Recurse to nested containers.
         measure_timeslice_used(container['nest'], device, timevals)
+
+
+def get_io_service_bytes(container, device):
+    """ Measure the value of io.io_service_bytes for the given device in the
+        given container.
+    """
+    total = 0
+    for line in container.get_attr('io_service_bytes'):
+        parts = line.split()
+        if parts[0] == device and parts[1] == 'Total':
+            total = float(parts[2])
+    return total
 
 
 def release_containers(exper):
@@ -688,12 +700,17 @@ class test_harness(object):
         logging.info('Run the actual experiment now, launching all worker '
                      'processes.')
         start_seconds = time.time()
+        start_bytes = get_io_service_bytes(parent_blkio_cgroup, self.device)
         self.run_worker_processes_in_parallel(runners)
 
         logging.info('All workers have now completed or been killed by fastest '
                      'worker.')
         seconds_elapsed = time.time() - start_seconds
+        end_bytes = get_io_service_bytes(parent_blkio_cgroup, self.device)
+        mbytes_delta = (end_bytes - start_bytes) / math.pow(1024, 2)
         logging.info('Experiment completed in %.1f seconds', seconds_elapsed)
+        throughput = mbytes_delta / seconds_elapsed
+        logging.info('Aggregate Throughput = %f MB/s', throughput)
 
         timevals = {}
         measure_containers(exper, self.device, timevals)
