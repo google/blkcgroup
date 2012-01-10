@@ -18,19 +18,18 @@
 #     Experiment = Containers
 #     Containers = Container { , Container }
 #     Container  = Share [ Worker Repeat ]
-#     Share      = Integer
+#     Share      = Integer [P | S] P: Enable Prio, S: Enable shared sync queues
 #     Repeat     = [ * Integer ]
 #     Worker     = rdseq [.Wmode] | rdrand Delay | wrseq [. Wmode] | sleep
 #     Delay      = [ .delay Integer ]
 #     Wmode     = buf | sync | dir
 #
 #  TODO:
-#      Add support for io class
 #      Add support for io limiting
 #      Do more testing on non fakenuma systems
 
 
-import getopt, glob, logging, os, re, subprocess, sys, time, traceback, math
+import getopt, glob, logging, os, re, subprocess, sys, time, traceback
 import cgroup, cpuset, error, utils
 
 # Size of allocated containers for workers. We chose 360mb because it's small
@@ -707,7 +706,7 @@ class test_harness(object):
                      'worker.')
         seconds_elapsed = time.time() - start_seconds
         end_bytes = get_io_service_bytes(parent_blkio_cgroup, self.device)
-        mbytes_delta = (end_bytes - start_bytes) / math.pow(1024, 2)
+        mbytes_delta = (end_bytes - start_bytes) / (1024 ** 2)
         logging.info('Experiment completed in %.1f seconds', seconds_elapsed)
         throughput = mbytes_delta / seconds_elapsed
         logging.info('Aggregate Throughput = %f MB/s', throughput)
