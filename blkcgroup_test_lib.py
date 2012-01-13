@@ -30,7 +30,7 @@
 
 
 import getopt, glob, logging, os, re, subprocess, sys, time, traceback
-import cgroup, cpuset, error, utils
+import cgroup, cpuset, error, trace, utils
 
 # Size of allocated containers for workers. We chose 360mb because it's small
 # enough to allow lots of workers on systems with less memory, and it's
@@ -53,6 +53,7 @@ def usage(argv):
                      '-c: Cleans test data before running\n'
                      '-g: Adds Google-specific support code\n'
                      '-o file: Creates autotest output file\n'
+                     '-t dir: Enable tracing and save the output to <dir>\n'
                      '-h: Prints help information\n' % argv[0])
 
 
@@ -455,6 +456,33 @@ class test_harness(object):
     def __init__(self, title, post_experiment_cb=None):
         self.title = title
         self._post_experiment_cb = post_experiment_cb
+        self.tracepoints = ["block:submit_bio",
+                            "block:submit_bio_dentry",
+                            "block:block_rq_insert",
+                            "block:block_rq_issue",
+                            "block:block_rq_complete",
+                            "cfq:cfq_complete_request",
+                            "ext4:ext4_direct_IO_enter",
+                            "ext4:ext4_direct_IO_exit",
+                            "fs:diskmon_bio_complete",
+                            "fs:file_read_enter",
+                            "fs:file_read_exit",
+                            "tiny_syscalls:sys_enter_tiny_read",
+                            "tiny_syscalls:sys_exit_tiny_read",
+                            "tiny_syscalls:sys_enter_tiny_compat_read",
+                            "tiny_syscalls:sys_exit_tiny_compat_read",
+                            "syscalls:sys_enter_readv",
+                            "syscalls:sys_exit_readv",
+                            "syscalls:sys_enter_compat_readv",
+                            "syscalls:sys_exit_compat_readv",
+                            "syscalls:sys_enter_pread64",
+                            "syscalls:sys_exit_pread64",
+                            "syscalls:sys_enter_preadv",
+                            "syscalls:sys_exit_preadv",
+                            "syscalls:sys_enter_compat_pread",
+                            "syscalls:sys_exit_compat_pread",
+                            "syscalls:sys_enter_compat_preadv",
+                            "syscalls:sys_exit_compat_preadv"]
 
 
     def some_zeroed_input_file(self, prefix, mbytes):
@@ -626,7 +654,8 @@ class test_harness(object):
         return tasks
 
 
-    def run_worker_processes_in_parallel(self, runners):
+    def run_worker_processes_in_parallel(self, runners, tracing_enabled,
+                                         trace_file_dir, exper_num):
         sys.stdout.flush()
         sys.stderr.flush()
         pids = []
@@ -651,14 +680,24 @@ class test_harness(object):
             # we are parent
             pids.append(pid)
 
+        if tracing_enabled:
+            trace_file_dir = trace_file_dir.rstrip("/")
+            f = "%s/trace-exp-%s.txt" % (trace_file_dir, exper_num)
+            tracer = trace.simple_tracer(f)
+            tracer.setup_tracepoints(self.tracepoints)
+            tracer.start_tracing()
+
         logging.debug('waiting for worker tasks')
         for pid in pids:
             pid, status = os.waitpid(pid, 0)
 
+        if tracing_enabled:
+            tracer.stop_tracing()
+
 
     def run_single_experiment(self, exper_num, experiment, seq_read_mb,
                               kill_slower, timeout, allowed_error,
-                              autotest_data):
+                              autotest_data, tracing_enabled, trace_file_dir):
         """Run a single experiment involving one round of concurrent execution
            of IO workers in competing containers.
         """
@@ -700,10 +739,13 @@ class test_harness(object):
                      'processes.')
         start_seconds = time.time()
         start_bytes = get_io_service_bytes(parent_blkio_cgroup, self.device)
-        self.run_worker_processes_in_parallel(runners)
+
+        self.run_worker_processes_in_parallel(runners, tracing_enabled,
+                                              trace_file_dir, exper_num)
 
         logging.info('All workers have now completed or been killed by fastest '
                      'worker.')
+
         seconds_elapsed = time.time() - start_seconds
         end_bytes = get_io_service_bytes(parent_blkio_cgroup, self.device)
         mbytes_delta = (end_bytes - start_bytes) / (1024 ** 2)
@@ -764,7 +806,7 @@ class test_harness(object):
         """
 
         try:
-            opts, args = getopt.getopt(sys.argv[1:], 'cgho:', ['help'])
+            opts, args = getopt.getopt(sys.argv[1:], 'cghot:', ['help'])
         except getopt.GetoptError, err:
             print str(err)
             usage(sys.argv)
@@ -773,6 +815,7 @@ class test_harness(object):
         cleanup = False
         google_hacks = False
         autotest_output = False
+        enable_tracing = False
 
         for o, a in opts:
             if o == '-c':
@@ -781,6 +824,9 @@ class test_harness(object):
                 google_hacks = True
             elif o == '-o':
                 autotest_output = a
+            elif o == '-t':
+                enable_tracing = True
+                trace_file_dir = a
             elif o in ('-h', '--help'):
                 usage(sys.argv)
                 sys.exit()
@@ -831,7 +877,8 @@ class test_harness(object):
             workers, allowed_error = experiment
             self.run_single_experiment(i, workers, seq_read_mb,
                                        kill_slower, timeout, allowed_error,
-                                       autotest_data)
+                                       autotest_data, enable_tracing,
+                                       trace_file_dir)
 
         # We have to do file output after all the worker threads are done and we
         # won't create any more. Printing during score_experiment() caused
@@ -850,6 +897,11 @@ class test_harness(object):
                 self.tried_experiments,  self.passed_experiments,
                 self.tried_experiments - self.passed_experiments)
 
+        # Zip up the traces because they can get large.
+        if enable_tracing:
+            utils.system("tar -cvzf %s/traces.tar.gz %s/trace-exp-*.txt" %
+                        (trace_file_dir, trace_file_dir))
+            utils.system("rm -f %s/trace-exp-*.txt" % trace_file_dir)
 
         # Cleanup.
         utils.system('rm -rf %s' % self.workdir)
