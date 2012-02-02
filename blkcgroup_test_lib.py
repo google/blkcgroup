@@ -48,6 +48,8 @@ TEST_CGROUP_PREFIX = 'blkcgroupt'
 # TODO(teravest): Set this up from kernel version instead.
 BLKIO_CGROUP_NAME = 'io'
 
+IS_MEMCG = False
+
 def usage(argv):
     """Prints usage information to stderr."""
     sys.stderr.write('%s [-cgh] [-o file]: Runs a blkcgroup isolation test\n'
@@ -59,7 +61,8 @@ def usage(argv):
 
 def delete_test_containers():
     """Deletes all test containers that could be created by this test."""
-    for r in ('cpuset', 'io'):
+    logging.info("Deleting old test containers.")
+    for r in ('cpuset', 'io', 'memory'):
         cgroups = glob.glob('/dev/cgroup/%s/%s*' % (r, TEST_CGROUP_PREFIX))
         for cgroup in cgroups:
           igroups = glob.glob('%s/%s*' %
@@ -184,8 +187,8 @@ def plan_container_size(container):
     return mbytes
 
 
-def setup_container(container, cname, device,
-                    root_name, my_cpu_parent, my_io_parent):
+def setup_container(container, cname, device, root_name, my_cpu_parent,
+                    my_io_parent, my_memory_parent):
     """Create a new os container for constraining and isolating the cpus, mem,
        and disk IO of one set of io workers, from other workers.
        An os container is a pairing of a cpuset cgroup with an io cgroup,
@@ -198,42 +201,50 @@ def setup_container(container, cname, device,
     mbytes = plan_container_size(container)
     weight = container['weight']
 
-    path = cpuset.create_container_cpuset(
-                   cname, 'cpuset', root=my_cpu_parent.name, mbytes=mbytes)
+    cpuset_path = cpuset.create_container_cpuset(cname, root=my_cpu_parent.name)
 
     blk_path = cpuset.create_container_blkio(
-                   device, cname, 'io',
+                   device, cname,
                    root=my_io_parent.name, weight=weight,
                    priority=container['priority'],
                    shared_sync_queues=container['shared_sync_queues'])
-    logging.info( "path: " + path + " blk_path: " + blk_path)
+
+    memory_path = cpuset.create_container_memory(
+            cname, root=my_cpu_parent.name, mbytes=mbytes)
+
+    logging.debug("cpuset_container: %s, blkcgroup_container: %s, "
+                  "memory_container: %s", cpuset_path, blk_path, memory_path)
 
     # Setup a view.
-    cpu_cgroup = cgroup.cgroup('cpuset', path)
+    memory_cgroup = cpu_cgroup = cgroup.cgroup('cpuset', cpuset_path)
     blkio_cgroup = cgroup.cgroup('io', blk_path)
+    if IS_MEMCG:
+        memory_cgroup = cgroup.cgroup('memory', memory_path)
 
     container['cpu_cgroup'] = cpu_cgroup
     container['blkio_cgroup'] = blkio_cgroup
+    container['memory_cgroup'] = memory_cgroup
     name = cpu_cgroup.name  # eg  default/g0/g1
     if root_name:  # remove default/
         name = name[len(root_name)+1:]
     container['name'] = name  # eg g0/g1
 
 
-def setup_containers(tree, device,
-                     root_name, my_cpu_parent, my_blkio_parent):
+def setup_containers(tree, device, root_name, my_cpu_parent,
+                     my_blkio_parent, my_memory_parent):
     """Recursive top-down tree walk, creating all containers & cgroups
-       needed for one experiment.  my_*_parent describe the existing cpu
-       cgroup and io cgroup of this subtree's parent container.
+       needed for one experiment.  my_*_parent describe the existing cpu,
+       io & memory cgroup of this subtree's parent container.
     """
     for i, container in enumerate(tree):
         # Create next sibling container at this level
         setup_container(container, '%s%d' % (TEST_CGROUP_PREFIX, i), device,
-                        root_name, my_cpu_parent, my_blkio_parent)
+                        root_name, my_cpu_parent, my_blkio_parent,
+                        my_memory_parent)
 
         setup_containers(container['nest'], device,
                          root_name, container['cpu_cgroup'],
-                         container['blkio_cgroup'])
+                         container['blkio_cgroup'], container['memory_cgroup'])
 
 
 def measure_containers(tree, device, timevals):
@@ -301,6 +312,8 @@ def release_containers(exper):
 
         container['cpu_cgroup'].release()
         container['blkio_cgroup'].release()
+        if IS_MEMCG:
+            container['memory_cgroup'].release()
 
 
 def remove_file(file):
@@ -368,28 +381,43 @@ def kill_slower_workers(fast_pid, cpu_cgroup, pids_file):
         os.rename(pids_file, moved_pids_file)
     except OSError:
         return
+
     logging.debug('fastest worker pid %d of container %s'
                   ' killing all slower workers',
                   fast_pid, cpu_cgroup.path)
+
     for line in open(moved_pids_file):
         pid = int(line.rstrip())
         if pid != fast_pid:
             utils.system('kill %d' % pid, ignore_status=True)
 
 
-def run_worker(cmd, cpu_cgroup, blkio_cgroup, pids_file):
+def run_worker(cmd, cpu_cgroup, blkio_cgroup, memory_cgroup, pids_file):
     # main of new process for running an independent worker shell
     logging.debug('Worker running command: %s' % cmd)
+
+    # Move the task pid to the required cgroups.
     logging.debug('Moving to cpu_cgroup: %s' % cpu_cgroup.path)
-    logging.debug('Moving to blkio_cgroup: %s' % blkio_cgroup.path)
     cpu_cgroup.move_my_task_here()
+
+    logging.debug('Moving to blkio_cgroup: %s' % blkio_cgroup.path)
     blkio_cgroup.move_my_task_here()
+
+    # Check if we need to move the pid to the memory cgroup as well.
+    if IS_MEMCG:
+        logging.debug('Moving to memory_cgroup: %s' % memory_cgroup.path)
+        memory_cgroup.move_my_task_here()
+    else:
+        logging.debug('Process already moved to memory_cgroup: %s.' %
+                      memory_cgroup.path)
+
     p = subprocess.Popen(cmd.split(),
                          stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT,
                          close_fds=True)
     if pids_file:
         utils.system('echo %d >> %s' % (p.pid, pids_file))
+
     logging.debug('running "%s" in container %s and io cgroup %s as pid %d',
                   cmd, cpu_cgroup.path, blkio_cgroup.path, p.pid)
 
@@ -610,7 +638,9 @@ class test_harness(object):
                 if cmd:
                     tasks.append([cmd,
                                   container['cpu_cgroup'],
-                                  container['blkio_cgroup'],  pids_file])
+                                  container['blkio_cgroup'],
+                                  container['memory_cgroup'],
+                                  pids_file])
 
             # Timeout is empty here because we don't want to recursively
             # add the sleep code.
@@ -622,8 +652,17 @@ class test_harness(object):
             # shortens experiment when fastest worker was given low weight
             cmd = 'sleep %s' % timeout
             container = tree[0]
-            tasks.append([cmd, cgroup.root_cgroup('cpuset'),
-                          cgroup.root_cgroup(BLKIO_CGROUP_NAME), pids_file])
+            if IS_MEMCG:
+                tasks.append([cmd, cgroup.root_cgroup('cpuset'),
+                              cgroup.root_cgroup(BLKIO_CGROUP_NAME),
+                              cgroup.root_cgroup('memory'),
+                              pids_file])
+            else:
+                tasks.append([cmd, cgroup.root_cgroup('cpuset'),
+                              cgroup.root_cgroup(BLKIO_CGROUP_NAME),
+                              cgroup.root_cgroup('cpuset'),
+                              pids_file])
+
         return tasks
 
 
@@ -684,17 +723,21 @@ class test_harness(object):
         utils.drop_caches()
 
         # Generate class cgroup_access objects or cpuset and blkio.
-        parent_cpu_cgroup = cgroup.root_cgroup('cpuset')
+        parent_memory_cgroup = parent_cpu_cgroup = cgroup.root_cgroup('cpuset')
         parent_blkio_cgroup  = cgroup.root_cgroup(BLKIO_CGROUP_NAME)
+        if IS_MEMCG:
+            parent_memory_cgroup = cgroup.root_cgroup('memory')
 
-        logging.info('parent_cpu_cgroup: ' + parent_cpu_cgroup.path +
-                     ' parent_blkio_cgroup: ' + parent_blkio_cgroup.path)
+        logging.info('Cgroup roots - cpu: %s, blkio:%s, memory: %s',
+                     parent_cpu_cgroup.path, parent_blkio_cgroup.path,
+                     parent_memory_cgroup.path)
 
-        logging.info('Create all required containers.')
-        setup_containers(exper, self.device,
-            parent_cpu_cgroup.name, parent_cpu_cgroup, parent_blkio_cgroup)
+        logging.info('Creating all required containers.')
+        setup_containers(exper, self.device, parent_cpu_cgroup.name,
+                         parent_cpu_cgroup, parent_blkio_cgroup,
+                         parent_memory_cgroup)
 
-        # Add all required workers  & parameters to the tasks list.
+        # Add all required workers & parameters to the tasks list.
         runners = self.enum_worker_runners(exper, pids_file, timeout)
 
         logging.info('Run the actual experiment now, launching all worker '
@@ -790,6 +833,7 @@ class test_harness(object):
 
         if cleanup:
             delete_test_containers()
+
         logging.info('Starting test "%s"', self.title)
 
         # Create the test directory on the workvol.
@@ -819,6 +863,11 @@ class test_harness(object):
         self.existing_input_files = {}
         self.tried_experiments  = 0
         self.passed_experiments = 0
+
+        # Check the memory isolation scheme.
+        global IS_MEMCG
+        IS_MEMCG = cpuset.is_memcg()
+        logging.info('Memcg memory isolation: %s', IS_MEMCG)
 
         logging.info('%d total experiment runs', len(experiments))
 

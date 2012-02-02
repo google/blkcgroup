@@ -176,3 +176,10 @@ class cgroup_accessor(object):
             # remove the now-empty outermost cgroup of this subtree
             os.rmdir(self.path)
             logging.debug('Deleted cgroup %s', self.path)
+
+            # Check if memory container exists.
+            memory_path = os.path.join('/dev/cgroup/memory',
+                                       os.path.basename(self.path))
+            if os.path.exists(memory_path):
+                os.rmdir(memory_path)
+                logging.debug('Deleted memory cgroup %s', memory_path)

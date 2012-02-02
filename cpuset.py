@@ -19,7 +19,7 @@ import glob, fcntl, logging, os, re
 import error, utils
 
 SUPER_ROOT = ''      # root of all containers or cgroups
-NO_LIMIT = (1 << 63) - 1   # containername/memory.limit_in_bytes if no limit
+NO_LIMIT = (1 << 63) - 1   # containername/memory/memory.limit_in_bytes
 
 super_root_path = ''    # usually '/dev/cgroup'; '/dev/cpuset' on 2.6.18
 cpuset_prefix   = None  # usually 'cpuset.'; '' on 2.6.18
@@ -44,15 +44,12 @@ def discover_container_style():
         super_root_path = '/dev/cgroup'
         cpuset_prefix = 'cpuset.'
         if get_boot_numa():
-            mem_isolation_on = fake_numa_containers = True
+            mem_isolation_on = False
+            fake_numa_containers = True
         else:  # memcg containers IFF compiled-in & mounted & non-fakenuma boot
             fake_numa_containers = False
-            #TODO(teravest): Fix this to detect correct mounting.
             mem_isolation_on = os.path.exists(
-                    '/dev/cgroup/memory.limit_in_bytes')
-            # TODO: handle possibility of where memcg is mounted as its own
-            #       cgroup hierarchy, separate from cpuset?
-
+                    '/dev/cgroup/memory/memory.limit_in_bytes')
     else:
         # neither cpuset nor cgroup filesystem active:
         super_root_path = None
@@ -61,9 +58,10 @@ def discover_container_style():
 
     logging.debug('mem_isolation: %s', mem_isolation_on)
     logging.debug('fake_numa_containers: %s', fake_numa_containers)
+
+    # Get the total available memory depending on memory isolation scheme.
     if fake_numa_containers:
         node_mbytes = int(mbytes_per_mem_node())
-
     elif mem_isolation_on:  # memcg-style containers
         # For now, limit total of all containers to using just 98% of system's
         # visible total ram, to avoid oom events at system level, and avoid
@@ -73,6 +71,15 @@ def discover_container_style():
         root_container_bytes = usable_pages << 12
         logging.debug('root_container_bytes: %s',
                       utils.human_format(root_container_bytes))
+
+
+def is_memcg():
+    """Return True/False depending on the memory isolation scheme is memcg."""
+    discover_container_style()
+    if mem_isolation_on:
+        return True
+    else:
+        return False
 
 
 def need_mem_containers():
@@ -312,7 +319,7 @@ def set_blkio_controls(container_name, device,
     # Set the service level for the device.
     disk_info = '%s %d 0 %s' % (device, priority, weight / 10)
     utils.write_one_line(weight_device, disk_info)
-    
+
     logging.debug('set io_service_level of %s to %s',
                   container_name, disk_info)
 
@@ -325,35 +332,50 @@ def set_blkio_controls(container_name, device,
     logging.info('shared sync queues device: ' + shared_sync_queues_device)
     shared_sync_queues_str = "%d" % shared_sync_queues
     utils.write_one_line(shared_sync_queues_device, "%d" % shared_sync_queues)
-    
+
     logging.debug('set shared_sync_queues of %s to %s',
                   container_name, shared_sync_queues_str)
 
 
-def create_container_with_specific_mems_cpus(name, mems, cpus):
+def _create_fakenuma_container(name, mems):
+    # Ensure that fakenuma is enabled.
     need_fake_numa()
-    os.mkdir(full_path(name))
+
+    container_path = full_path(name)
+    if os.path.exists(container_path):
+        logging.debug('Container %s already exists. Updating current values.',
+                      container_path)
+    else:
+        raise error.Error('Container: %s does not exist.', container_path)
+
     utils.write_one_line(cpuset_attr(name, 'mem_hardwall'), '1')
     utils.write_one_line(mems_path(name), ','.join(map(str, mems)))
-    utils.write_one_line(cpus_path(name), ','.join(map(str, cpus)))
-    logging.debug('container %s has %d cpus and %d nodes totalling %s bytes',
-                  name, len(cpus), len(get_mem_nodes(name)),
-                  utils.human_format(container_bytes(name)) )
+    logging.debug('Created memory container %s (fakenuma) with %d nodes '
+                  'equalling %sBytes.', name, len(get_mem_nodes(name)),
+                  utils.human_format(container_bytes(name)))
 
 
-def create_container_via_memcg(name, parent, bytes, cpus):
-    # create container via direct memcg cgroup writes
+def _create_memcg_container(name, req_bytes):
+    # Ensure that memory isolation (memcg) is enabled.
+    need_mem_containers()
+
+    # Create & initialize the memory container.
     os.mkdir(full_path(name))
-    nodes = utils.read_one_line(mems_path(parent))
-    utils.write_one_line(mems_path(name), nodes)  # inherit parent's nodes
-    utils.write_one_line(memory_path(name)+'.limit_in_bytes', str(bytes))
-    utils.write_one_line(cpus_path(name), ','.join(map(str, cpus)))
-    logging.debug('Created container %s directly via memcg,'
-                  ' has %d cpus and %s bytes',
-                  name, len(cpus), utils.human_format(container_bytes(name)))
+    utils.write_one_line(memory_path(name)+'.limit_in_bytes', str(req_bytes))
+    logging.debug('Created memory container %s (memcg) with %sBytes.',
+                  name, utils.human_format(container_bytes(name)))
 
 
-def _create_fake_numa_container_directly(name, parent, mbytes, cpus):
+def _create_cpuset_container(name, cpus):
+    # Create & initialize the cpu container.
+    cpuset_path = full_path(os.path.join("cpuset", os.path.basename(name)))
+    os.mkdir(full_path(cpuset_path))
+    utils.write_one_line(cpus_path(cpuset_path), ','.join(map(str, cpus)))
+    logging.debug('Created cpuset container %s with %s cpus.', 
+                  name, len(cpus))
+
+
+def _create_fake_numa_container_directly(name, parent, mbytes):
     need_fake_numa()
     lockfile = my_lock('inner')   # serialize race between parallel tests
     try:
@@ -380,27 +402,56 @@ def _create_fake_numa_container_directly(name, parent, mbytes, cpus):
                       % ((needed_kbytes - kbytes)//1024) )
         mems = nodes[-nodecnt:]
 
-        create_container_with_specific_mems_cpus(name, mems, cpus)
+        _create_fakenuma_container(name, mems)
     finally:
         my_unlock(lockfile)
 
 
-def create_container_directly(name, mbytes, cpus):
+def create_container_directly(name, mbytes):
     parent = os.path.dirname(name)
     if fake_numa_containers:
-        _create_fake_numa_container_directly(name, parent, mbytes, cpus)
+        _create_fake_numa_container_directly(name, parent, mbytes)
     else:
-        create_container_via_memcg(name, parent, mbytes<<20, cpus)
+        _create_memcg_container(name, mbytes<<20)
 
 
-def create_container_cpuset(name, tree, mbytes, cpus=None, root=SUPER_ROOT):
+def create_container_memory(name, mbytes, root=SUPER_ROOT):
+    """Create a memory container and move job's current pid into it.
+
+    Args:
+        name = arbitrary string tag
+        mbytes = reqested memory for job in megabytes
+        root = the parent cpuset to nest this new set within
+            '': unnested top-level container
+    Return:
+        name: the name of the container.
+    """
+    discover_container_style()
+
+    if fake_numa_containers:
+        # Fake numa.
+        croot = os.path.join('cpuset', root)
+    else:
+        # Memcg.
+        croot = os.path.join('memory', root)
+
+    if not container_exists(croot):
+        raise error.Error('Parent container "%s" does not exist' % root)
+
+    cname = os.path.join(croot, name)  # path relative to super_root
+
+    # Create the containers.
+    create_container_directly(cname, mbytes)
+
+    return os.path.join(root, name)
+
+
+def create_container_cpuset(name, cpus=None, root=SUPER_ROOT):
     """Create a cpuset container and move job's current pid into it.
     Allocate the list "cpus" of cpus to that container
 
     Args:
         name = arbitrary string tag
-        tree = cgroup tree
-        mbytes = reqested memory for job in megabytes
         cpus = list of cpu indicies to associate with the cpuset
             defaults to all cpus avail with given root
         root = the parent cpuset to nest this new set within
@@ -408,12 +459,13 @@ def create_container_cpuset(name, tree, mbytes, cpus=None, root=SUPER_ROOT):
     Return:
         name: the name of the container.
     """
-    need_mem_containers()
-    croot = os.path.join(tree, root)
+    croot = os.path.join('cpuset', root)
+
     if not container_exists(croot):
         raise error.Error('Parent container "%s" does not exist' % root)
+
     if cpus is None:
-        # default to biggest container we can make under root
+        # Use all the cpus present on system.
         cpus = get_cpus(croot)
     else:
         cpus = set(cpus)  # interface uses list
@@ -425,14 +477,15 @@ def create_container_cpuset(name, tree, mbytes, cpus=None, root=SUPER_ROOT):
         raise error.Error('Container %s already exists. '
                           'Try running test with -c which deletes '
                           'test state.' % name)
-    create_container_directly(cname, mbytes, cpus)
+
+    # Create the containers.
+    _create_cpuset_container(cname, cpus)
+
     return os.path.join(root, name)
 
 
-def create_container_blkio(device, name, tree,
-                           root=SUPER_ROOT,
-                           weight=None,
-                           priority=None,
+def create_container_blkio(device, name, root=SUPER_ROOT,
+                           weight=None, priority=None,
                            shared_sync_queues=None):
     """Create a cpuset container and move job's current pid into it.
     Allocate the list "cpus" of cpus to that container
@@ -440,7 +493,6 @@ def create_container_blkio(device, name, tree,
     Args:
         device = the device under test.
         name = arbitrary string tag
-        tree = cgroup tree
         root = the parent cpuset to nest this new set within
             '': unnested top-level container
         weight = user specified weight for the blkio subsystem
@@ -460,7 +512,7 @@ def create_container_blkio(device, name, tree,
     if shared_sync_queues is None:
         raise ValueError('shared_sync_queues not defined.')
 
-    croot = os.path.join(tree, root)
+    croot = os.path.join('io', root)
 
     cname = os.path.join(croot, name)  # path relative to super_root
     if os.path.exists(full_path(cname)):
